@@ -95,6 +95,43 @@ describe('/rate', () => {
   });
 });
 
+describe('lists and editing', () => {
+  it('shows favourites as one list and opens a single listing for editing', async () => {
+    const a = add('a');
+    const b = add('b');
+    store.setUserState(a, 'favorite');
+    store.setUserState(b, 'favorite');
+
+    await say('/favorites');
+    expect(sent('sendMessage')).toHaveLength(1); // one message, not one per listing
+    expect(lastCard().text).toContain('Favourites (2)');
+    expect(lastCard().text).toContain(`/show_${a}`);
+    expect(lastCard().text).toContain(`/show_${b}`);
+
+    await say(`/show_${a}`);
+    expect(lastCard().text).toContain(`Listing ${a} · ⭐ favourite`);
+    expect(buttons(lastCard())).toEqual([`u:${a}`, `i:${a}`, 'https://example.test/a']);
+
+    await press(`i:${a}`); // contacted, but already rented
+    expect(store.byId(a)!.userState).toBe('ignored');
+    expect(sent('answerCallbackQuery').at(-1)!.payload.text).toBe('Moved from favourites to ignored');
+    expect(store.favorites().map((r) => r.id)).toEqual([b]);
+
+    await say('/ignored');
+    expect(lastCard().text).toContain('Ignored (1)');
+    await press(`u:${a}`);
+    expect(store.byId(a)!.userState).toBe('none');
+
+    await say('/show_9999');
+    expect(lastCard().text).toContain('no listing with that number');
+  });
+
+  it('says so when there are none', async () => {
+    await say('/favorites');
+    expect(lastCard().text).toContain('No favourites yet');
+  });
+});
+
 describe('pasted links', () => {
   it('treats a bare link with notes like /add', async () => {
     await say('https://www.facebook.com/groups/1984259601822354/posts/1 T2 900€ Gaia mobilado com garagem');

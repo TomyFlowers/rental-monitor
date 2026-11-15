@@ -68,6 +68,27 @@ export class Monitor {
     return score >= n.instantMinScore ? 'instant' : score >= n.digestMinScore ? 'digest' : 'none';
   }
 
+  /** When a source that refused us may be tried again, or null if it is not resting. */
+  cooldownUntil(source: string): Date | null {
+    const until = this.store.get(`cooldown:${source}`);
+    return until && until > this.iso() ? new Date(until) : null;
+  }
+
+  /**
+   * After a refusal (403) or rate limit (429) the source is left alone for a
+   * while: 2 hours, doubling on each repeat up to 12, or longer if the site
+   * names a wait itself.
+   */
+  private rest(source: string, retryAfterSec: number | null): void {
+    const n = Number(this.store.get(`blocks:${source}`) ?? '0') + 1;
+    this.store.set(`blocks:${source}`, String(n));
+    const hours = Math.min(12, 2 * 2 ** (n - 1));
+    const ms = Math.max(hours * 3_600_000, (retryAfterSec ?? 0) * 1000);
+    const until = new Date(this.clock().getTime() + ms).toISOString();
+    this.store.set(`cooldown:${source}`, until);
+    this.log.warn({ source, until }, 'source refused the request; resting it');
+  }
+
   /** Checks every enabled source once. Returns null if a run is already in progress. */
   async runAll(): Promise<RunSummary[] | null> {
     if (this.running) return null;
@@ -79,6 +100,7 @@ export class Monitor {
       for (const adapter of this.adapters) {
         const sc = this.cfg.sources[adapter.name];
         if (!sc?.enabled) continue;
+        if (this.cooldownUntil(adapter.name)) continue;
         const firstRun = !this.store.hasSuccessfulRun(adapter.name);
         anyFirstRun ||= firstRun;
         summaries.push(await this.searchSource(adapter, sc, firstRun));
@@ -89,7 +111,7 @@ export class Monitor {
       }
       for (const adapter of this.adapters) {
         // A disabled source (e.g. a site that refuses requests) is left alone entirely.
-        if (!this.cfg.sources[adapter.name]?.enabled) continue;
+        if (!this.cfg.sources[adapter.name]?.enabled || this.cooldownUntil(adapter.name)) continue;
         await this.detailsPhase(adapter);
         await this.delistPhase(adapter, startedAt);
       }
@@ -143,10 +165,12 @@ export class Monitor {
       }
     } catch (err) {
       s.blocked = err instanceof HttpError && err.blocked;
+      if (err instanceof HttpError && err.blocked) this.rest(adapter.name, err.retryAfterSec);
       s.ok = s.found > 0;
       s.note = err instanceof Error ? err.message : String(err);
       this.log.warn({ source: adapter.name, err: s.note }, 'search failed');
     }
+    if (!s.blocked && s.ok) this.store.set(`blocks:${adapter.name}`, '0');
     this.store.recordRun({ source: s.source, startedAt, ok: s.ok, found: s.found, fresh: s.fresh, note: s.note });
     this.log.info({ ...s }, 'source checked');
     return s;

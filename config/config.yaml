@@ -22,8 +22,8 @@ sources:
       - https://www.imovirtual.com/pt/resultados/arrendar/apartamento/porto/vila-nova-de-gaia?ownerTypeSingleSelect=ALL&priceMax=1300&by=LATEST&direction=DESC
   casasapo:
     enabled: true
-    maxPages: 3
-    firstRunMaxPages: 8
+    maxPages: 2              # this site rate-limits (HTTP 429): keep it light
+    firstRunMaxPages: 3
     searches:
       - https://casa.sapo.pt/alugar-apartamentos/mais-recentes/porto/
   olx:

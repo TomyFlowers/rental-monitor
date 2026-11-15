@@ -261,18 +261,49 @@ describe('delisting', () => {
 describe('health alerts', () => {
   beforeEach(seed);
 
-  it('alerts once after three failed checks and once on recovery', async () => {
+  it('alerts once when a source refuses requests and once on recovery', async () => {
     site.fail = new HttpError('HTTP 403 for https://example.test/search', 403, 'x');
     for (let i = 0; i < 5; i++) {
       await check();
       hours(1);
     }
-    const alerts = tg.texts.filter((t) => t.includes('failed'));
+    const alerts = tg.texts.filter((t) => t.includes('🚨'));
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toContain('refusing requests');
     site.fail = null;
+    hours(4); // past the rest period
     await check();
     expect(tg.texts.filter((t) => t.includes('working again'))).toHaveLength(1);
+  });
+
+  it('rests a source that refused a request, for longer each time, and resumes afterwards', async () => {
+    site.fail = new HttpError('HTTP 429', 429, 'x');
+    await check();
+    const before = site.searches;
+    hours(1);
+    await check(); // still resting: the site is not contacted
+    expect(site.searches).toBe(before);
+    expect(monitor.cooldownUntil('imovirtual')).not.toBeNull();
+    hours(1.1); // 2 h rest is over; it fails again and now rests 4 h
+    await check();
+    expect(site.searches).toBe(before + 1);
+    hours(3);
+    await check();
+    expect(site.searches).toBe(before + 1);
+    site.fail = null;
+    hours(1.1);
+    await check();
+    expect(site.searches).toBe(before + 2);
+    expect(monitor.cooldownUntil('imovirtual')).toBeNull();
+  });
+
+  it('alerts after three ordinary failures in a row', async () => {
+    site.fail = new Error('connect timeout');
+    for (let i = 0; i < 4; i++) {
+      await check();
+      hours(1);
+    }
+    expect(tg.texts.filter((t) => t.includes('failed 3 checks in a row'))).toHaveLength(1);
   });
 
   it('treats an empty result page as a failure', async () => {

@@ -72,7 +72,7 @@ export function alertHtml(ev: Pick<EventRow, 'type' | 'payload' | 'row'>, destin
   return lines.join('\n');
 }
 
-/** One compact line per listing for the digest. */
+/** One compact line per listing. /show_<n> is tappable in Telegram and opens the card with buttons. */
 export function digestLine(row: ListingRow, prefix = ''): string {
   const l = row.listing;
   const bits = [
@@ -82,6 +82,7 @@ export function digestLine(row: ListingRow, prefix = ''): string {
     esc(trim(place(row), 40)),
     l.commuteMinutes === null ? null : `🚗${Math.round(l.commuteMinutes)}m`,
     row.userState === 'favorite' ? '⭐' : null,
+    `/show_${row.id}`,
   ];
   return `${prefix}${bits.filter(Boolean).join(' · ')}\n   <a href="${esc(l.url)}">${esc(trim(l.title || 'Open listing', 60))}</a>`;
 }

@@ -273,6 +273,13 @@ export class Store {
       .map((r) => toRow(r as Raw));
   }
 
+  ignored(): ListingRow[] {
+    return this.db
+      .prepare(`SELECT ${L_COLS} FROM listings l WHERE l.user_state = 'ignored' ORDER BY l.last_seen DESC, l.score DESC`)
+      .all()
+      .map((r) => toRow(r as Raw));
+  }
+
   counts(): { active: number; matches: number; favorites: number; ignored: number; removed: number } {
     const r = this.db
       .prepare(

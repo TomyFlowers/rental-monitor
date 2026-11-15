@@ -21,6 +21,8 @@ const HELP = [
   '/rate – go through matches you have not rated yet, one at a time',
   '/top – best current matches',
   '/favorites – listings you starred',
+  '/ignored – listings you ignored',
+  '/show_12 – tap one in any list to open that listing with its buttons',
   '/add &lt;link&gt; [notes] – score a listing you found yourself (e.g. on Facebook: <code>/add https://… T2 900€ Gaia mobilado</code>)',
   'Or just paste a link (with optional notes) without any command.',
   '/check – check all sites now',
@@ -71,6 +73,7 @@ export class TelegramBot implements Notifier {
       { command: 'rate', description: 'Rate matches one at a time' },
       { command: 'top', description: 'Best current matches' },
       { command: 'favorites', description: 'Listings you starred' },
+      { command: 'ignored', description: 'Listings you ignored' },
       { command: 'add', description: 'Score a listing from a link' },
       { command: 'check', description: 'Check all sites now' },
       { command: 'pause', description: 'Stop checks and messages' },
@@ -130,6 +133,12 @@ export class TelegramBot implements Notifier {
       this.log.debug({ err: String(err), listing: row.listing.url }, 'photos could not be sent');
     }
     await this.bot.api.sendMessage(chatId, html, { parse_mode: 'HTML', reply_markup: buttons, link_preview_options: { is_disabled: true } });
+  }
+
+  /** The full card for one listing: its facts and where it stands. */
+  private cardHtml(row: ListingRow): string {
+    const state = row.status === 'removed' ? '❌ no longer online' : row.userState === 'ignored' ? '🚫 ignored' : row.userState === 'favorite' ? '⭐ favourite' : 'not rated';
+    return alertHtml({ type: 'new', payload: {}, row }, this.cfg.commute.destination.name).replace(/^.*\n/, `📋 <b>Listing ${row.id} · ${state} · ${Math.round(row.evaluation.score)}/100</b>\n`);
   }
 
   /** Sends the best listing this chat has not rated or skipped yet, or says there is none left. */
@@ -199,10 +208,20 @@ export class TelegramBot implements Notifier {
       await ctx.reply(['<b>Top matches</b>', ...rows.map((r, i) => digestLine(r, `${i + 1}. `))].join('\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
     });
 
-    this.bot.command('favorites', async (ctx) => {
-      const rows = this.store.favorites();
-      if (rows.length === 0) return ctx.reply('No favourites yet. Tap ⭐ on a listing to add one.');
-      await ctx.reply(['<b>Favourites</b>', ...rows.map((r) => digestLine(r, r.status === 'removed' ? '❌ ' : ''))].join('\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
+    const list = async (ctx: Context, rows: ListingRow[], title: string, empty: string, line: (row: ListingRow) => string = (r) => digestLine(r, r.status === 'removed' ? '❌ ' : '')) => {
+      if (rows.length === 0) return ctx.reply(empty);
+      const shown = rows.slice(0, 25);
+      const head = `<b>${title} (${rows.length})</b>${rows.length > shown.length ? ` – first ${shown.length}` : ''}\nTap a /show link to open a listing with its buttons.`;
+      await ctx.reply([head, ...shown.map(line)].join('\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
+    };
+    this.bot.command('favorites', (ctx) => list(ctx, this.store.favorites(), 'Favourites', 'No favourites yet. Tap ⭐ on a listing to add one.'));
+    this.bot.command('ignored', (ctx) => list(ctx, this.store.ignored(), 'Ignored', 'Nothing is ignored.'));
+
+    // /show_12 (tappable in lists) or "/show 12": the full card for one listing, with buttons.
+    this.bot.hears(/^\/show[_ ](\d+)(?:@\w+)?$/, async (ctx) => {
+      const row = this.store.byId(Number(ctx.match[1]));
+      if (!row || !ctx.chat) return ctx.reply('There is no listing with that number.');
+      await this.sendCard(ctx.chat.id, row, this.cardHtml(row), row.listing.images.slice(0, this.cfg.notifications.ratePhotos));
     });
 
     this.bot.command('check', async (ctx) => {
@@ -239,7 +258,7 @@ export class TelegramBot implements Notifier {
       const before = this.store.byId(id);
       if (!before) return ctx.answerCallbackQuery({ text: 'That listing is no longer in the database.' });
       this.store.setUserState(id, state);
-      const text = state === 'favorite' ? 'Added to favourites' : state === 'ignored' ? 'Ignored: no more messages about this one' : 'Undone';
+      const text = state === 'favorite' ? 'Added to favourites' : state === 'ignored' ? (before.userState === 'favorite' ? 'Moved from favourites to ignored' : 'Ignored: no more messages about this one') : 'Undone';
       await ctx.answerCallbackQuery({ text });
       await this.refreshButtons(ctx, id);
     });
@@ -281,6 +300,8 @@ export class TelegramBot implements Notifier {
         continue;
       }
       const last = this.store.recentRuns(name, 1)[0];
+      const resting = this.hooks?.monitor.cooldownUntil(name);
+      if (resting) lines.push(`• ${esc(name)}: 💤 resting until ${fmt(resting)} after the site refused or rate-limited a request`);
       lines.push(
         last
           ? `• ${esc(name)}: ${last.ok ? '✅' : '⚠️'} ${fmt(last.startedAt)}, ${last.found} read, ${last.fresh} new${last.note ? `\n   <i>${esc(last.note.slice(0, 200))}</i>` : ''}`

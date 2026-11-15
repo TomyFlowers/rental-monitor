@@ -20,6 +20,8 @@ export class HttpError extends Error {
     message: string,
     readonly status: number | null,
     readonly url: string,
+    /** Seconds the site asked us to wait (Retry-After), when it said. */
+    readonly retryAfterSec: number | null = null,
   ) {
     super(message);
     this.name = 'HttpError';
@@ -79,12 +81,13 @@ export class PoliteHttpClient implements HttpClient {
         });
         const body = await res.text();
         if (res.ok || opts.accept?.includes(res.status)) return { status: res.status, body, finalUrl: res.url || url };
-        const err = new HttpError(`HTTP ${res.status} for ${url}`, res.status, url);
-        // Retrying a refusal only makes things worse; server errors may be transient.
-        if (res.status < 500 && res.status !== 429) throw err;
+        const wait = Number(res.headers.get('retry-after'));
+        const err = new HttpError(`HTTP ${res.status} for ${url}`, res.status, url, Number.isFinite(wait) && wait > 0 ? wait : null);
+        // Retrying a refusal or a rate limit only makes things worse; server errors may be transient.
+        if (res.status < 500) throw err;
         lastErr = err;
       } catch (err) {
-        if (err instanceof HttpError && err.status !== null && err.status < 500 && err.status !== 429) throw err;
+        if (err instanceof HttpError && err.status !== null && err.status < 500) throw err;
         lastErr = err;
       }
       this.log.debug({ url, attempt, err: String(lastErr) }, 'request failed, will retry');

@@ -39,11 +39,16 @@ export class HealthMonitor {
 
       const recent = this.store.recentRuns(s.source, this.cfg.failureThreshold);
       const failing = recent.length >= this.cfg.failureThreshold && recent.every((r) => !r.ok);
-      if (failing && !wasDown) {
+      if (s.blocked && !wasDown) {
+        // A refused source is rested for hours, so waiting for several failures would take most of a day.
         this.store.set(downKey, '1');
-        const why = s.blocked ? 'The site is refusing requests (blocked or rate-limited).' : 'The site may be down or may have changed its layout.';
         await this.send(
-          `🚨 <b>${esc(s.source)}</b> has failed ${recent.length} checks in a row. ${why}\nLast error: <code>${esc((s.note ?? 'unknown').slice(0, 300))}</code>\nYou will get one message when it recovers.`,
+          `🚨 <b>${esc(s.source)}</b> is refusing requests (blocked or rate-limited). It will be left alone and retried later, waiting longer after each refusal; /status shows when.\nLast error: <code>${esc((s.note ?? 'unknown').slice(0, 300))}</code>\nYou will get one message when it recovers.`,
+        );
+      } else if (failing && !wasDown) {
+        this.store.set(downKey, '1');
+        await this.send(
+          `🚨 <b>${esc(s.source)}</b> has failed ${recent.length} checks in a row. The site may be down or may have changed its layout.\nLast error: <code>${esc((s.note ?? 'unknown').slice(0, 300))}</code>\nYou will get one message when it recovers.`,
         );
       }
     }

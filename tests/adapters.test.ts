@@ -63,7 +63,7 @@ describe('commute enrichment', () => {
     const out = await e.enrich(listing({ lat: 41.15, lon: -8.61 }));
     expect(out.commuteMinutes).toBe(19.5); // 15 x 1.3
     expect(out.coordsApprox).toBe(false);
-    expect(calls[0]).toContain('/route/v1/driving/-8.61,41.15;-8.5932,41.1066');
+    expect(calls[0]).toContain(`/route/v1/driving/-8.61,41.15;${cfg.commute.destination.lon},${cfg.commute.destination.lat}`);
     await e.enrich(listing({ sourceId: 'b', lat: 41.1501, lon: -8.6101 })); // same block: served from cache
     expect(calls).toHaveLength(1);
   });

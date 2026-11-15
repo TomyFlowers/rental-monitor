@@ -35,8 +35,7 @@ cp .env.example .env      # then edit .env: paste the token and the user IDs
 `.env` is git-ignored. Keep the token out of chat and out of `config.yaml`.
 
 Review `config/config.yaml`: the search URLs, rent caps and weights are
-already set to what we agreed. **Please confirm the hospital coordinates**
-under `commute.destination` on a map; they are approximate.
+already set to what we agreed.
 
 ### 3. Run on the NAS
 
@@ -80,7 +79,9 @@ shows up in `/top` and in the 19:00 digest.
 | `/status` | Running or paused, counts, last result per site, next check |
 | `/rate` | Shows the best match you have not rated yet with ⭐ Favorite / 🚫 Ignore / ⏭ Skip; each press brings the next one. Skipped ones return on the next `/rate` |
 | `/top` | Ten best current matches |
-| `/favorites` | Listings you starred |
+| `/favorites` | Listings you starred, as one list |
+| `/ignored` | Listings you ignored |
+| `/show_12` | Every line in a list, `/top` and the digest ends with a tappable `/show_<number>`. It opens that listing as a card with its buttons, which is where you change it |
 | `/add <link> [notes]` | Scores a listing you found yourself. Imovirtual and OLX links are read from the site. For anything else (Facebook), type the facts after the link: `/add https://facebook.com/... T2 900€ Gaia mobilado com garagem` |
 | *(a pasted link)* | Same as `/add`, without typing the command |
 | `/check` | Check all sites now |
@@ -161,6 +162,11 @@ is "from area centre". Public transport time is not included.
   `docker compose restart`. A mistake stops the container with a message
   naming the bad field (`docker compose logs`).
 - **Updating the code**: `docker compose up -d --build`.
+- **Refusals and rate limits**: when a site answers 403 or 429 it is not
+  retried. It is rested for 2 hours, doubling on each repeat up to 12 (or
+  longer if the site names a wait), you get one message, and `/status` shows
+  when it will be tried again. Each container start runs a check right away,
+  so avoid restarting repeatedly.
 - **Requests made**: per site, 1-3 results pages per search per hour plus up
   to 40 listing pages, one request at a time with 2.5-6 s between them.
   `http.robotsTxt` is `warn` (logs if a path is disallowed); set `enforce` to
@@ -179,7 +185,7 @@ Scoring, storage, change detection and notifications need no changes.
 
 ```bash
 pnpm install
-pnpm test          # 104 tests: text extraction, scoring, parsers, bot, full pipeline
+pnpm test          # 109 tests: text extraction, scoring, parsers, bot, full pipeline
 pnpm typecheck
 pnpm dev           # run from source (needs .env)
 ```
@@ -188,7 +194,6 @@ pnpm dev           # run from source (needs .env)
 
 - SUPERCASA adapter.
 - Automated Facebook Marketplace/groups monitoring (paste links instead).
-- Rating buttons on digest and `/top` lines (use `/rate`).
 - Public-transport commute time.
 - Merging the same flat posted separately on two sites. (OLX ads that link
   to Imovirtual are already merged.)

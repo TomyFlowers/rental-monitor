@@ -50,6 +50,13 @@ describe('http client', () => {
     expect(err.blocked).toBe(true);
     expect(calls).toHaveLength(1);
   });
+  it('does not retry a rate limit, and keeps the wait the site asked for', async () => {
+    const calls: string[] = [];
+    const fake = (async (url: string) => (calls.push(url), new Response('slow down', { status: 429, headers: { 'retry-after': '600' } }))) as unknown as typeof fetch;
+    const err = await new PoliteHttpClient(http, silentLogger, fake).get('https://a.test/x').catch((e) => e);
+    expect(err).toMatchObject({ status: 429, blocked: true, retryAfterSec: 600 });
+    expect(calls).toHaveLength(1);
+  });
   it('obeys robots.txt when set to enforce', async () => {
     const fake = (async (url: string) => new Response(url.endsWith('/robots.txt') ? 'User-agent: *\nDisallow: /private' : 'ok')) as unknown as typeof fetch;
     const c = new PoliteHttpClient({ ...http, robotsTxt: 'enforce' }, silentLogger, fake);
