@@ -62,7 +62,8 @@ export function parseSearch(html: string, now: Date): SearchPage {
     listings.push(applyText(l, '', now));
   }
   const pages = $('a[href*="pn="]').map((_i, a) => Number(/[?&]pn=(\d+)/.exec($(a).attr('href') ?? '')?.[1] ?? 0)).get();
-  return { listings, mode: 'html', totalPages: pages.length ? Math.max(...pages) : null };
+  // Reading the markup is this site's normal path, not a fallback, so it is not reported as degraded.
+  return { listings, mode: 'structured', totalPages: pages.length ? Math.max(...pages) : null };
 }
 
 /** The listing's own page: used by /add and to confirm a listing is still online. */

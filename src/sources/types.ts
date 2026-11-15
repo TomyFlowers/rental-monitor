@@ -4,7 +4,7 @@ import { extractFeatures, norm } from '../core/text.js';
 
 export interface SearchPage {
   listings: Listing[];
-  /** 'structured' = embedded data was found; 'html' = fell back to reading the markup. */
+  /** 'structured' = the adapter's normal path worked; 'html' = it fell back to a less detailed reading of the markup. */
   mode: 'structured' | 'html';
   totalPages: number | null;
 }

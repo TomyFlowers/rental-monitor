@@ -43,6 +43,7 @@ describe('casa sapo', () => {
   it('reads cards, unwrapping the click-counter links', () => {
     const res = sapo.parseSearch(html, NOW);
     expect(res.totalPages).toBe(16);
+    expect(res.mode).toBe('structured'); // the markup is the normal path here: no "format changed" alert
     expect(res.listings).toHaveLength(2);
     expect(res.listings[0]).toMatchObject({
       source: 'casasapo', sourceId: '9fad9333-cbdf-11f1-9aaf-060000000054',

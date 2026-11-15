@@ -1,6 +1,6 @@
 {
   "name": "rental-monitor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Monitors rental listings, scores them against configurable criteria and notifies a private Telegram bot",
   "type": "module",
