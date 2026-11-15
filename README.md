@@ -80,14 +80,25 @@ shows up in `/top` and in the 19:00 digest.
 | `/rate` | Shows the best match you have not rated yet with ⭐ Favorite / 🚫 Ignore / ⏭ Skip; each press brings the next one. Skipped ones return on the next `/rate` |
 | `/top` | Ten best current matches |
 | `/favorites` | Listings you starred, as one list |
+| `/contacted` | Favourites you have contacted, longest-waiting first, with the latest note |
 | `/ignored` | Listings you ignored |
 | `/show_12` | Every line in a list, `/top` and the digest ends with a tappable `/show_<number>`. It opens that listing as a card with its buttons, which is where you change it |
+| `/note 12 text` | Adds a note to listing 12. Replying to a listing card with plain text does the same |
 | `/add <link> [notes]` | Scores a listing you found yourself. Imovirtual and OLX links are read from the site. For anything else (Facebook), type the facts after the link: `/add https://facebook.com/... T2 900€ Gaia mobilado com garagem` |
 | *(a pasted link)* | Same as `/add`, without typing the command |
 | `/check` | Check all sites now |
 | `/pause`, `/resume` | Stop and restart checks and messages |
 
-Favourites and ignores are shared by everyone on the allow list. An ignored
+### Tracking contacts
+
+A favourite's card has a **📞 Contacted** button. After that it offers
+**📅 Visit booked** and **🚫 Closed** (closed moves it to ignored, e.g. when
+the flat turns out to be rented). Each step can be undone from the same card.
+Contacted listings keep reporting price changes and removals, and the 19:00
+digest lists any that have had no update (stage change or note) for
+`notifications.contactNudgeDays` days (3 by default, 0 turns it off).
+
+Favourites, ignores, stages and notes are shared by everyone on the allow list. An ignored
 listing never produces another message.
 
 ## Sources
@@ -185,7 +196,7 @@ Scoring, storage, change detection and notifications need no changes.
 
 ```bash
 pnpm install
-pnpm test          # 109 tests: text extraction, scoring, parsers, bot, full pipeline
+pnpm test          # 114 tests: text extraction, scoring, parsers, bot, full pipeline
 pnpm typecheck
 pnpm dev           # run from source (needs .env)
 ```

@@ -110,6 +110,7 @@ notifications:
   topPicks: 5
   photos: 4
   ratePhotos: 3              # photos per listing in /rate
+  contactNudgeDays: 3        # digest reminder for contacted listings with no update (0 = off)
   firstRun: digest           # digest | instant  (digest avoids a flood on day one)
   delistCheck:
     perRun: 10               # tracked listings re-checked per run

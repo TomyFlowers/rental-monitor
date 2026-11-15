@@ -72,6 +72,12 @@ export function alertHtml(ev: Pick<EventRow, 'type' | 'payload' | 'row'>, destin
   return lines.join('\n');
 }
 
+/** "today", "yesterday", "4 days ago". */
+export function ago(iso: string, now: Date): string {
+  const days = Math.floor((now.getTime() - Date.parse(iso)) / 86_400_000);
+  return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+}
+
 /** One compact line per listing. /show_<n> is tappable in Telegram and opens the card with buttons. */
 export function digestLine(row: ListingRow, prefix = ''): string {
   const l = row.listing;
@@ -81,7 +87,7 @@ export function digestLine(row: ListingRow, prefix = ''): string {
     l.price === null ? null : euro(l.price),
     esc(trim(place(row), 40)),
     l.commuteMinutes === null ? null : `🚗${Math.round(l.commuteMinutes)}m`,
-    row.userState === 'favorite' ? '⭐' : null,
+    row.userState === 'favorite' ? (row.stage === 'visit' ? '📅' : row.stage === 'contacted' ? '📞' : '⭐') : null,
     `/show_${row.id}`,
   ];
   return `${prefix}${bits.filter(Boolean).join(' · ')}\n   <a href="${esc(l.url)}">${esc(trim(l.title || 'Open listing', 60))}</a>`;
@@ -93,6 +99,8 @@ export interface DigestInput {
   changed: EventRow[];
   removed: EventRow[];
   topPicks: ListingRow[];
+  /** Contacted listings with no update for a while. */
+  waiting?: Array<{ row: ListingRow; since: string }>;
   hidden: number;
   sources: Array<{ name: string; last: RunRow | null }>;
 }
@@ -122,6 +130,7 @@ export function digestHtml(d: DigestInput): string[] {
   );
   section(`Removed (${d.removed.length})`, d.removed.map((ev) => digestLine(ev.row, '❌ ')));
   section('Top picks right now', d.topPicks.map((row, i) => digestLine(row, `${i + 1}. `)));
+  section('Contacted, no update since', (d.waiting ?? []).map((w) => digestLine(w.row, `${w.since} · `)));
   if (d.fresh.length + d.changed.length + d.removed.length + d.hidden === 0) blocks.splice(1, 0, 'Nothing new today.');
   const health = d.sources.map((s) => `${sourceName(s.name)} ${s.last === null ? '–' : s.last.ok ? '✅' : '⚠️'}`).join(' · ');
   if (health) blocks.push(`\n<i>Sources: ${health}</i>`);

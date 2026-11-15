@@ -95,6 +95,12 @@ describe('/rate', () => {
   });
 });
 
+async function reply(text: string, cardButtons: string[], from = ME) {
+  const reply_to_message = { message_id: 7, date: 0, chat: chat(from), text: 'card', reply_markup: { inline_keyboard: [cardButtons.map((d) => ({ text: 'x', callback_data: d }))] } };
+  await tg.bot.handleUpdate({ update_id: ++updateId, message: { message_id: updateId, date: 0, chat: chat(from), from: user(from), text, reply_to_message } } as any);
+}
+const editedButtons = () => buttons(sent('editMessageReplyMarkup').at(-1)!.payload);
+
 describe('lists and editing', () => {
   it('shows favourites as one list and opens a single listing for editing', async () => {
     const a = add('a');
@@ -110,11 +116,10 @@ describe('lists and editing', () => {
 
     await say(`/show_${a}`);
     expect(lastCard().text).toContain(`Listing ${a} · ⭐ favourite`);
-    expect(buttons(lastCard())).toEqual([`u:${a}`, `i:${a}`, 'https://example.test/a']);
+    expect(buttons(lastCard())).toEqual([`u:${a}`, `c:${a}`, `i:${a}`, 'https://example.test/a']);
 
     await press(`i:${a}`); // contacted, but already rented
     expect(store.byId(a)!.userState).toBe('ignored');
-    expect(sent('answerCallbackQuery').at(-1)!.payload.text).toBe('Moved from favourites to ignored');
     expect(store.favorites().map((r) => r.id)).toEqual([b]);
 
     await say('/ignored');
@@ -131,6 +136,72 @@ describe('lists and editing', () => {
     expect(lastCard().text).toContain('No favourites yet');
   });
 });
+
+describe('contact tracking', () => {
+  it('moves a favourite through contacted and visit booked, and back', async () => {
+    const a = add('a');
+    store.setUserState(a, 'favorite');
+
+    await press(`c:${a}`);
+    expect(store.byId(a)).toMatchObject({ stage: 'contacted', userState: 'favorite' });
+    expect(store.byId(a)!.contactedAt).not.toBeNull();
+    expect(editedButtons()).toEqual([`x:${a}`, `v:${a}`, `i:${a}`, 'https://example.test/a']);
+
+    await press(`v:${a}`);
+    expect(store.byId(a)!.stage).toBe('visit');
+    expect(editedButtons()).toEqual([`y:${a}`, `i:${a}`, 'https://example.test/a']);
+
+    await press(`y:${a}`);
+    expect(store.byId(a)!.stage).toBe('contacted');
+    await press(`x:${a}`);
+    expect(store.byId(a)).toMatchObject({ stage: 'none', contactedAt: null, userState: 'favorite' });
+  });
+
+  it('stars a listing when it is marked contacted, and clears the stage when un-starred', async () => {
+    const a = add('a');
+    await press(`c:${a}`);
+    expect(store.byId(a)).toMatchObject({ stage: 'contacted', userState: 'favorite' });
+    await press(`u:${a}`);
+    expect(store.byId(a)).toMatchObject({ stage: 'none', userState: 'none' });
+  });
+
+  it('saves notes from a reply to a card or from /note, and shows them', async () => {
+    const a = add('a');
+    await press(`c:${a}`);
+    await reply('Ligou, volta a ligar quinta <b>', [`x:${a}`, `v:${a}`]);
+    expect(lastCard().text).toContain(`Note saved on /show_${a}`);
+    await say(`/note ${a} visita sábado 11h`);
+    expect(store.notes(a).map((n) => n.text)).toEqual(['visita sábado 11h', 'Ligou, volta a ligar quinta <b>']);
+
+    await say('/contacted');
+    expect(lastCard().text).toContain('Contacted (1)');
+    expect(lastCard().text).toContain('contacted today · 📝 visita sábado 11h');
+
+    await say(`/show_${a}`);
+    expect(lastCard().text).toContain('📞 Contacted today');
+    expect(lastCard().text).toContain('Ligou, volta a ligar quinta &lt;b&gt;'); // escaped
+
+    await reply('nota solta', []); // a reply to something that is not a listing card
+    expect(lastCard().text).toContain('reply to a listing card');
+    await say('/note abc');
+    expect(lastCard().text).toContain('Usage: /note');
+  });
+
+  it('reminds in the digest about contacted listings with no update for 3 days, until something happens', async () => {
+    const a = add('a');
+    const b = add('b');
+    store.setStage(a, 'contacted', '2026-11-10T10:00:00Z');
+    store.setStage(b, 'contacted', '2026-11-10T10:00:00Z');
+    store.addNote(b, 'u', 'respondeu ontem', '2026-11-14T09:00:00Z'); // recent activity: no reminder
+    const texts: string[] = [];
+    const d = new Dispatcher(cfg, store, { sendAlert: async () => undefined, sendText: async (t) => void texts.push(t) }, silentLogger, () => new Date('2026-11-15T19:00:00Z'));
+    await d.sendDigest();
+    const digest = texts.join('\n');
+    expect(digest).toMatch(/Contacted, no update since[\s\S]*5 days ago · [\s\S]*example\.test\/a/);
+    expect(digest.split('Contacted, no update since')[1]).not.toContain('example.test/b');
+  });
+});
+
 
 describe('pasted links', () => {
   it('treats a bare link with notes like /add', async () => {

@@ -78,6 +78,8 @@ export const configSchema = z.strictObject({
     topPicks: z.number().int().min(0),
     photos: z.number().int().min(0).max(10),
     ratePhotos: z.number().int().min(0).max(10).default(3),
+    /** Days without an update before a contacted listing is mentioned in the digest; 0 turns it off. */
+    contactNudgeDays: z.number().min(0).default(3),
     firstRun: z.enum(['digest', 'instant']).default('digest'),
     delistCheck: z.strictObject({
       perRun: z.number().int().min(0),

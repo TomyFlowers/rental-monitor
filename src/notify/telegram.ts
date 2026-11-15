@@ -5,7 +5,7 @@ import type { Logger } from '../logger.js';
 import { UserError, type Monitor, type RunSummary } from '../pipeline/monitor.js';
 import type { ListingRow, Store, UserState } from '../store/db.js';
 import type { Dispatcher, Notifier } from './dispatcher.js';
-import { alertHtml, digestLine, esc } from './format.js';
+import { ago, alertHtml, digestLine, esc } from './format.js';
 
 export interface BotHooks {
   monitor: Monitor;
@@ -21,8 +21,10 @@ const HELP = [
   '/rate – go through matches you have not rated yet, one at a time',
   '/top – best current matches',
   '/favorites – listings you starred',
+  '/contacted – favourites you have contacted, longest-waiting first',
   '/ignored – listings you ignored',
   '/show_12 – tap one in any list to open that listing with its buttons',
+  '/note 12 text – add a note (or just reply to a listing card)',
   '/add &lt;link&gt; [notes] – score a listing you found yourself (e.g. on Facebook: <code>/add https://… T2 900€ Gaia mobilado</code>)',
   'Or just paste a link (with optional notes) without any command.',
   '/check – check all sites now',
@@ -32,11 +34,20 @@ const HELP = [
 
 export function keyboard(row: ListingRow): InlineKeyboard {
   const kb = new InlineKeyboard();
-  if (row.userState === 'favorite') kb.text('⭐ Favorited (undo)', `u:${row.id}`);
-  else kb.text('⭐ Favorite', `f:${row.id}`);
-  if (row.userState === 'ignored') kb.text('🚫 Ignored (undo)', `u:${row.id}`);
-  else kb.text('🚫 Ignore', `i:${row.id}`);
-  return kb.url('🔗 Open', row.listing.url);
+  const open = () => kb.url('🔗 Open', row.listing.url);
+  if (row.userState === 'ignored') {
+    kb.text('⭐ Favorite', `f:${row.id}`).text('🚫 Ignored (undo)', `u:${row.id}`);
+    return open();
+  }
+  if (row.userState !== 'favorite') {
+    kb.text('⭐ Favorite', `f:${row.id}`).text('🚫 Ignore', `i:${row.id}`);
+    return open();
+  }
+  // A favourite moves through stages: contacted, then visit booked. "Closed" is ignore.
+  if (row.stage === 'none') kb.text('⭐ Favorited (undo)', `u:${row.id}`).text('📞 Contacted', `c:${row.id}`).row().text('🚫 Ignore', `i:${row.id}`);
+  else if (row.stage === 'contacted') kb.text('📞 Contacted (undo)', `x:${row.id}`).text('📅 Visit booked', `v:${row.id}`).row().text('🚫 Closed', `i:${row.id}`);
+  else kb.text('📅 Visit booked (undo)', `y:${row.id}`).row().text('🚫 Closed', `i:${row.id}`);
+  return open();
 }
 
 /** Buttons for the /rate flow: every press moves on to the next listing. */
@@ -73,7 +84,9 @@ export class TelegramBot implements Notifier {
       { command: 'rate', description: 'Rate matches one at a time' },
       { command: 'top', description: 'Best current matches' },
       { command: 'favorites', description: 'Listings you starred' },
+      { command: 'contacted', description: 'Favourites you have contacted' },
       { command: 'ignored', description: 'Listings you ignored' },
+      { command: 'note', description: 'Add a note: /note 12 text' },
       { command: 'add', description: 'Score a listing from a link' },
       { command: 'check', description: 'Check all sites now' },
       { command: 'pause', description: 'Stop checks and messages' },
@@ -135,10 +148,14 @@ export class TelegramBot implements Notifier {
     await this.bot.api.sendMessage(chatId, html, { parse_mode: 'HTML', reply_markup: buttons, link_preview_options: { is_disabled: true } });
   }
 
-  /** The full card for one listing: its facts and where it stands. */
+  /** The full card for one listing: facts, where it stands, and its latest notes. */
   private cardHtml(row: ListingRow): string {
     const state = row.status === 'removed' ? '❌ no longer online' : row.userState === 'ignored' ? '🚫 ignored' : row.userState === 'favorite' ? '⭐ favourite' : 'not rated';
-    return alertHtml({ type: 'new', payload: {}, row }, this.cfg.commute.destination.name).replace(/^.*\n/, `📋 <b>Listing ${row.id} · ${state} · ${Math.round(row.evaluation.score)}/100</b>\n`);
+    const lines = [alertHtml({ type: 'new', payload: {}, row }, this.cfg.commute.destination.name).replace(/^.*\n/, `📋 <b>Listing ${row.id} · ${state} · ${Math.round(row.evaluation.score)}/100</b>\n`)];
+    const now = new Date();
+    if (row.contactedAt) lines.push(`📞 Contacted ${ago(row.contactedAt, now)}${row.stage === 'visit' && row.stageAt ? ` · 📅 visit booked ${ago(row.stageAt, now)}` : ''}`);
+    for (const n of this.store.notes(row.id, 3).reverse()) lines.push(`📝 ${esc(n.author)}, ${ago(n.at, now)}: ${esc(n.text)}`);
+    return lines.join('\n');
   }
 
   /** Sends the best listing this chat has not rated or skipped yet, or says there is none left. */
@@ -216,6 +233,13 @@ export class TelegramBot implements Notifier {
     };
     this.bot.command('favorites', (ctx) => list(ctx, this.store.favorites(), 'Favourites', 'No favourites yet. Tap ⭐ on a listing to add one.'));
     this.bot.command('ignored', (ctx) => list(ctx, this.store.ignored(), 'Ignored', 'Nothing is ignored.'));
+    this.bot.command('contacted', (ctx) =>
+      list(ctx, this.store.inProgress(), 'Contacted', 'Nothing in progress. Tap 📞 Contacted on a favourite once you have written or called.', (row) => {
+        const what = row.stage === 'visit' ? `visit booked ${ago(row.stageAt ?? '', new Date())}` : `contacted ${ago(row.contactedAt ?? row.stageAt ?? '', new Date())}`;
+        const note = this.store.notes(row.id, 1)[0];
+        return `${digestLine(row, row.status === 'removed' ? '❌ ' : '')}\n   ${what}${note ? ` · 📝 ${esc(note.text.slice(0, 80))}` : ''}`;
+      }),
+    );
 
     // /show_12 (tappable in lists) or "/show 12": the full card for one listing, with buttons.
     this.bot.hears(/^\/show[_ ](\d+)(?:@\w+)?$/, async (ctx) => {
@@ -223,6 +247,28 @@ export class TelegramBot implements Notifier {
       if (!row || !ctx.chat) return ctx.reply('There is no listing with that number.');
       await this.sendCard(ctx.chat.id, row, this.cardHtml(row), row.listing.images.slice(0, this.cfg.notifications.ratePhotos));
     });
+
+    const saveNote = async (ctx: Context, id: number, text: string) => {
+      const row = this.store.byId(id);
+      if (!row) return ctx.reply('There is no listing with that number.');
+      if (!text.trim()) return ctx.reply('Usage: /note <number> <text>, or reply to a listing card with the text.');
+      this.store.addNote(id, ctx.from?.first_name ?? 'someone', text.trim().slice(0, 500), new Date().toISOString());
+      await ctx.reply(`📝 Note saved on /show_${id}`);
+    };
+    this.bot.command('note', (ctx) => {
+      const m = /^(\d+)\s+([\s\S]+)$/.exec(ctx.match.trim());
+      return m ? saveNote(ctx, Number(m[1]), m[2]!) : ctx.reply('Usage: /note <number> <text>, or reply to a listing card with the text.');
+    });
+    // Replying to a listing card with plain text saves the text as a note on that listing.
+    this.bot.on('message:text').filter(
+      (ctx) => !!ctx.message.reply_to_message && !ctx.message.text.startsWith('/'),
+      (ctx) => {
+        const rows = ctx.message.reply_to_message?.reply_markup?.inline_keyboard ?? [];
+        const data = rows.flat().map((b) => ('callback_data' in b ? b.callback_data : '')).find((d) => /^\w+:\d+$/.test(d ?? ''));
+        if (!data) return ctx.reply('To add a note, reply to a listing card (a message with buttons), or use /note <number> <text>.');
+        return saveNote(ctx, Number(data.split(':')[1]), ctx.message.text);
+      },
+    );
 
     this.bot.command('check', async (ctx) => {
       if (!this.hooks) return;
@@ -251,14 +297,42 @@ export class TelegramBot implements Notifier {
     // A pasted link, with or without notes after it, works like /add.
     this.bot.hears(/^https?:\/\/\S+/i, (ctx) => add(ctx, ctx.message?.text ?? ''));
 
-    this.bot.callbackQuery(/^([fiu]):(\d+)$/, async (ctx) => {
-      const action = ctx.match[1];
+    this.bot.callbackQuery(/^([fiucvxy]):(\d+)$/, async (ctx) => {
+      const action = ctx.match[1]!;
       const id = Number(ctx.match[2]);
-      const state: UserState = action === 'f' ? 'favorite' : action === 'i' ? 'ignored' : 'none';
       const before = this.store.byId(id);
       if (!before) return ctx.answerCallbackQuery({ text: 'That listing is no longer in the database.' });
-      this.store.setUserState(id, state);
-      const text = state === 'favorite' ? 'Added to favourites' : state === 'ignored' ? (before.userState === 'favorite' ? 'Moved from favourites to ignored' : 'Ignored: no more messages about this one') : 'Undone';
+      const now = new Date().toISOString();
+      let text: string;
+      switch (action) {
+        case 'f':
+          this.store.setUserState(id, 'favorite');
+          text = 'Added to favourites';
+          break;
+        case 'i':
+          this.store.setUserState(id, 'ignored');
+          text = before.userState === 'favorite' ? 'Closed: moved from favourites to ignored' : 'Ignored: no more messages about this one';
+          break;
+        case 'c':
+          this.store.setStage(id, 'contacted', now);
+          text = 'Marked as contacted. Reply to this message to add a note.';
+          break;
+        case 'v':
+          this.store.setStage(id, 'visit', now);
+          text = 'Visit booked. Reply to this message to note the date.';
+          break;
+        case 'x':
+          this.store.setStage(id, 'none', now);
+          text = 'No longer marked as contacted';
+          break;
+        case 'y':
+          this.store.setStage(id, 'contacted', now);
+          text = 'Back to contacted';
+          break;
+        default:
+          this.store.setUserState(id, 'none');
+          text = 'Undone';
+      }
       await ctx.answerCallbackQuery({ text });
       await this.refreshButtons(ctx, id);
     });

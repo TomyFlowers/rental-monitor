@@ -1,7 +1,7 @@
 import type { Config } from '../config.js';
 import type { Logger } from '../logger.js';
 import type { EventRow, ListingRow, Store } from '../store/db.js';
-import { alertHtml, digestHtml } from './format.js';
+import { ago, alertHtml, digestHtml } from './format.js';
 
 /** What the dispatcher needs from a messaging channel. Telegram implements it; tests fake it. */
 export interface Notifier {
@@ -147,7 +147,15 @@ export class Dispatcher {
       .filter(([, s]) => s.enabled)
       .map(([name]) => ({ name, last: this.store.recentRuns(name, 1)[0] ?? null }));
 
-    const messages = digestHtml({ date: localTime(now, this.cfg.timezone).ymd, fresh, changed, removed: removed.slice(0, max), topPicks, hidden: allNew.length - fresh.length, sources });
+    const nudge = this.cfg.notifications.contactNudgeDays;
+    const waiting = nudge <= 0 ? [] : this.store
+      .inProgress()
+      .filter((row) => row.stage === 'contacted' && row.status === 'active')
+      .map((row) => ({ row, last: this.store.lastActivity(row) }))
+      .filter((w): w is { row: ListingRow; last: string } => w.last !== null && now.getTime() - Date.parse(w.last) >= nudge * 86_400_000)
+      .map((w) => ({ row: w.row, since: ago(w.last, now) }));
+
+    const messages = digestHtml({ date: localTime(now, this.cfg.timezone).ymd, fresh, changed, removed: removed.slice(0, max), topPicks, waiting, hidden: allNew.length - fresh.length, sources });
     for (const m of messages) await this.notifier.sendText(m);
 
     this.store.transaction(() => {

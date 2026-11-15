@@ -69,7 +69,7 @@ describe('message formatting', () => {
   const cfg = shippedConfig();
   const row = (over = {}): ListingRow => {
     const l = listing({ title: 'T2 <novo> & "raro"', commuteMinutes: 18, coordsApprox: true, furnished: 'yes', ...over });
-    return { id: 1, listing: l, evaluation: evaluate(l, cfg), status: 'active', userState: 'none', notified: false, announced: true, goneCount: 0, firstSeen: '', lastSeen: '' };
+    return { id: 1, listing: l, evaluation: evaluate(l, cfg), status: 'active', userState: 'none', stage: 'none', stageAt: null, contactedAt: null, notified: false, announced: true, goneCount: 0, firstSeen: '', lastSeen: '' };
   };
   it('escapes listing text and shows facts, flags and the link', () => {
     const html = alertHtml({ type: 'new', payload: {}, row: row() }, 'ULS Gaia/Espinho');

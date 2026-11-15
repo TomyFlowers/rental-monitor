@@ -46,12 +46,34 @@ CREATE TABLE IF NOT EXISTS source_runs (
   fresh      INTEGER NOT NULL,
   note       TEXT
 );
+CREATE TABLE IF NOT EXISTS notes (
+  id         INTEGER PRIMARY KEY,
+  listing_id INTEGER NOT NULL REFERENCES listings(id),
+  author     TEXT NOT NULL,
+  text       TEXT NOT NULL,
+  at         TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS geocache (query TEXT PRIMARY KEY, lat REAL, lon REAL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS commutecache (key TEXT PRIMARY KEY, minutes REAL, at TEXT NOT NULL);
 `;
 
 export type UserState = 'none' | 'favorite' | 'ignored';
+/** How far a favourite has got: nothing yet, landlord contacted, visit booked. */
+export type Stage = 'none' | 'contacted' | 'visit';
+
+export interface Note {
+  author: string;
+  text: string;
+  at: string;
+}
+
+/** Columns added after the first release; applied to databases created before them. */
+const ADDED_COLUMNS: Array<[string, string]> = [
+  ['stage', "TEXT NOT NULL DEFAULT 'none'"],
+  ['stage_at', 'TEXT'],
+  ['contacted_at', 'TEXT'],
+];
 
 export interface ListingRow {
   id: number;
@@ -59,6 +81,10 @@ export interface ListingRow {
   evaluation: Evaluation;
   status: 'active' | 'removed';
   userState: UserState;
+  stage: Stage;
+  /** When the current stage was set. */
+  stageAt: string | null;
+  contactedAt: string | null;
   notified: boolean;
   /** A "new match" event has been created for this listing. */
   announced: boolean;
@@ -94,6 +120,9 @@ function toRow(r: Raw): ListingRow {
     evaluation: JSON.parse(String(r.evaluation)) as Evaluation,
     status: r.status as ListingRow['status'],
     userState: r.user_state as UserState,
+    stage: r.stage as Stage,
+    stageAt: r.stage_at === null ? null : String(r.stage_at),
+    contactedAt: r.contacted_at === null ? null : String(r.contacted_at),
     notified: Number(r.notified) === 1,
     announced: Number(r.announced) === 1,
     goneCount: Number(r.gone_count),
@@ -102,7 +131,7 @@ function toRow(r: Raw): ListingRow {
   };
 }
 
-const L_COLS = 'l.id, l.data, l.evaluation, l.status, l.user_state, l.notified, l.announced, l.gone_count, l.first_seen, l.last_seen';
+const L_COLS = 'l.id, l.data, l.evaluation, l.status, l.user_state, l.stage, l.stage_at, l.contacted_at, l.notified, l.announced, l.gone_count, l.first_seen, l.last_seen';
 
 export class Store {
   private db: DatabaseSync;
@@ -111,6 +140,8 @@ export class Store {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     this.db.exec(SCHEMA);
+    const have = new Set(this.db.prepare('PRAGMA table_info(listings)').all().map((r) => String((r as Raw).name)));
+    for (const [name, ddl] of ADDED_COLUMNS) if (!have.has(name)) this.db.exec(`ALTER TABLE listings ADD COLUMN ${name} ${ddl}`);
   }
 
   close(): void {
@@ -167,8 +198,47 @@ export class Store {
     this.db.prepare('INSERT INTO price_history (listing_id, price, at) VALUES (?, ?, ?)').run(id, price, at);
   }
 
+  /** Un-starring a listing also clears its contact stage; ignoring keeps it as a record. */
   setUserState(id: number, state: UserState): void {
-    this.db.prepare('UPDATE listings SET user_state = ? WHERE id = ?').run(state, id);
+    if (state === 'none') this.db.prepare("UPDATE listings SET user_state = 'none', stage = 'none', stage_at = NULL WHERE id = ?").run(id);
+    else this.db.prepare('UPDATE listings SET user_state = ? WHERE id = ?').run(state, id);
+  }
+
+  /** Moves a listing along (or back): contacting one also stars it. */
+  setStage(id: number, stage: Stage, now: string): void {
+    if (stage === 'none') {
+      this.db.prepare("UPDATE listings SET stage = 'none', stage_at = NULL, contacted_at = NULL WHERE id = ?").run(id);
+      return;
+    }
+    this.db
+      .prepare("UPDATE listings SET stage = ?, stage_at = ?, contacted_at = COALESCE(contacted_at, ?), user_state = 'favorite' WHERE id = ?")
+      .run(stage, now, now, id);
+  }
+
+  /** Favourites that have been contacted, the longest-waiting first. */
+  inProgress(): ListingRow[] {
+    return this.db
+      .prepare(`SELECT ${L_COLS} FROM listings l WHERE l.user_state = 'favorite' AND l.stage != 'none' ORDER BY l.stage_at ASC`)
+      .all()
+      .map((r) => toRow(r as Raw));
+  }
+
+  addNote(id: number, author: string, text: string, now: string): void {
+    this.db.prepare('INSERT INTO notes (listing_id, author, text, at) VALUES (?, ?, ?, ?)').run(id, author, text, now);
+  }
+
+  /** Most recent first. */
+  notes(id: number, limit = 5): Note[] {
+    return this.db
+      .prepare('SELECT author, text, at FROM notes WHERE listing_id = ? ORDER BY id DESC LIMIT ?')
+      .all(id, limit)
+      .map((r) => ({ author: String((r as Raw).author), text: String((r as Raw).text), at: String((r as Raw).at) }));
+  }
+
+  /** When anything last happened on a contacted listing: its stage change or its newest note. */
+  lastActivity(row: ListingRow): string | null {
+    const note = this.notes(row.id, 1)[0]?.at ?? null;
+    return [row.stageAt, note].filter((x): x is string => !!x).sort().pop() ?? null;
   }
 
   markNotified(id: number): void {
