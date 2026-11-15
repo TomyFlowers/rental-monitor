@@ -1,0 +1,109 @@
+# Rental monitor configuration. 
+# a typo stops the app with a message saying which field is wrong.
+
+timezone: Europe/Lisbon
+
+schedule:
+  intervalMinutes: 60        # how often each source is checked
+  jitterMinutes: 10          # each check is shifted by a random +/- this much
+  digestTime: "19:00"
+  quietHours:                # nothing is sent in this window; alerts queue up
+    start: "23:00"
+    end: "08:00"
+
+sources:
+  imovirtual:
+    enabled: true
+    maxPages: 3              # pages read per search on a normal run
+    firstRunMaxPages: 10     # deeper crawl the first time, to seed the database
+    searches:
+      - https://www.imovirtual.com/pt/resultados/arrendar/apartamento/porto/porto?ownerTypeSingleSelect=ALL&priceMax=1300&by=LATEST&direction=DESC
+      - https://www.imovirtual.com/pt/resultados/arrendar/apartamento/porto/vila-nova-de-gaia?ownerTypeSingleSelect=ALL&priceMax=1300&by=LATEST&direction=DESC
+  olx:
+    enabled: true
+    maxPages: 3
+    firstRunMaxPages: 8
+    searches:
+      - https://www.olx.pt/imoveis/apartamento-casa-a-venda/apartamentos-arrenda/porto/?search%5Bfilter_enum_tipologia%5D%5B0%5D=t2&search%5Bfilter_enum_tipologia%5D%5B1%5D=t1&search%5Bfilter_enum_tipologia%5D%5B2%5D=t3&search%5Bfilter_float_price%3Ato%5D=1350&search%5Border%5D=created_at%3Adesc
+
+http:
+  minDelayMs: 2500           # pause between requests to the same site
+  maxDelayMs: 6000
+  timeoutMs: 20000
+  retries: 2
+  userAgent: "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+  robotsTxt: warn            # warn | enforce | off
+
+details:
+  maxPerRun: 40              # listing pages opened per source per run
+
+# ---------------------------------------------------------------------------
+# Hard requirements: a listing that clearly violates one is rejected.
+# ---------------------------------------------------------------------------
+criteria:
+  municipalities: [Porto, Vila Nova de Gaia]
+  typology: { min: 1, max: 3 }          # T1 to T3
+  maxRent:                              # absolute cap per typology, EUR/month
+    T1: 1000
+    T2: 1150
+    T3: 1300
+    default: 1300                       # used when the typology is unknown
+  dealBreakers:
+    shortTerm: true                     # holiday, seasonal, "até junho", etc.
+    sharedRoom: true                    # rooms and shared flats
+  # What to do when a listing does not state a hard-requirement value:
+  #   flag    = keep it and show a warning on the alert
+  #   exclude = reject it
+  unknown:
+    municipality: flag
+    price: flag
+    typology: flag
+
+# ---------------------------------------------------------------------------
+# Soft preferences: each contributes weight x (0..1) to a 0-100 score.
+# Weights are relative; they do not need to add up to 100.
+# ---------------------------------------------------------------------------
+scoring:
+  unknownFraction: 0.5       # share of the weight earned when the value is unknown
+  weights:
+    commute: 25
+    rent: 20
+    registration: 15         # contract / tax-address registration allowed
+    typology: 10
+    furnished: 10
+    garage: 8
+    outdoor: 7
+    moveIn: 5
+  commute: { fullAtMinutes: 30, zeroAtMinutes: 50 }
+  rent: { fullAt: 1000, zeroAt: 1300 }
+  typology: { T2: 1, T1: 0.5, T3: 0.5 }
+  furnished: { yes: 1, partial: 0.5, no: 0 }
+  moveIn:
+    from: "2026-12-15"
+    to: "2027-02-15"
+    graceDays: 60            # score fades to 0 this many days outside the window
+
+commute:
+  enabled: true
+  destination:
+    name: "ULS Gaia/Espinho (Hospital Santos Silva)"
+    lat: 41.10434823712215
+    lon: -8.591542909995727
+  osrmUrl: https://router.project-osrm.org
+  nominatimUrl: https://nominatim.openstreetmap.org
+  trafficFactor: 1.3         # free-flow driving time is multiplied by this
+
+notifications:
+  instantMinScore: 75        # at or above: sent immediately
+  digestMinScore: 40         # at or above: included in the daily digest
+  maxInstantPerDay: 15       # overflow is moved to the digest
+  maxDigestItems: 15
+  topPicks: 5
+  photos: 4
+  firstRun: digest           # digest | instant  (digest avoids a flood on day one)
+  delistCheck:
+    perRun: 10               # tracked listings re-checked per run
+    confirmations: 2         # consecutive "gone" results before reporting removal
+
+health:
+  failureThreshold: 3        # consecutive failed/empty runs before you are alerted
