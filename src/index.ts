@@ -9,6 +9,8 @@ import { createLogger } from './logger.js';
 import { Dispatcher } from './notify/dispatcher.js';
 import { TelegramBot } from './notify/telegram.js';
 import { Monitor } from './pipeline/monitor.js';
+import { EmailAlertFeed } from './sources/email/index.js';
+import { ImapMailbox } from './sources/email/imap.js';
 import { createAdapters } from './sources/registry.js';
 import { Store } from './store/db.js';
 
@@ -29,7 +31,9 @@ async function main(): Promise<void> {
   for (const name of Object.keys(cfg.sources)) {
     if (!adapters.some((a) => a.name === name)) throw new Error(`config: unknown source "${name}" (known: ${adapters.map((a) => a.name).join(', ')})`);
   }
-  const monitor = new Monitor(cfg, store, adapters, new CommuteEnricher(cfg.commute, http, store, log), log);
+  if (cfg.email.enabled && !secrets.email) throw new Error('email.enabled is true but EMAIL_USER / EMAIL_PASSWORD are not set (see .env.example)');
+  const feeds = cfg.email.enabled && secrets.email ? [new EmailAlertFeed(cfg.email, cfg.criteria.municipalities, new ImapMailbox(cfg.email, secrets.email))] : [];
+  const monitor = new Monitor(cfg, store, adapters, new CommuteEnricher(cfg.commute, http, store, log), log, undefined, feeds);
   const telegram = new TelegramBot(secrets, cfg, store, log);
   const dispatcher = new Dispatcher(cfg, store, telegram, log);
   const health = new HealthMonitor(cfg.health, store, (html) => dispatcher.system(html));

@@ -77,6 +77,7 @@ export const configSchema = z.strictObject({
     maxDigestItems: z.number().int().min(1),
     topPicks: z.number().int().min(0),
     photos: z.number().int().min(0).max(10),
+    ratePhotos: z.number().int().min(0).max(10).default(3),
     firstRun: z.enum(['digest', 'instant']).default('digest'),
     delistCheck: z.strictObject({
       perRun: z.number().int().min(0),
@@ -84,6 +85,19 @@ export const configSchema = z.strictObject({
     }),
   }),
   health: z.strictObject({ failureThreshold: z.number().int().min(1).default(3) }),
+  /** Saved-search alert emails, read over IMAP. Credentials live in .env. */
+  email: z
+    .strictObject({
+      enabled: z.boolean().default(false),
+      host: z.string().min(1).default('imap.gmail.com'),
+      port: z.number().int().min(1).max(65535).default(993),
+      folder: z.string().min(1).default('INBOX'),
+      /** Only mail whose sender address ends in one of these domains is read. */
+      senders: z.array(z.string().min(3)).default(['idealista.pt', 'idealista.com', 'olx.pt', 'imovirtual.com', 'sapo.pt']),
+      maxMessagesPerRun: z.number().int().min(1).max(200).default(30),
+      markRead: z.boolean().default(true),
+    })
+    .prefault({}),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -112,6 +126,8 @@ export function loadConfig(path: string): Config {
 export interface Secrets {
   botToken: string;
   allowedUserIds: number[];
+  /** Mailbox login for alert emails; null when not configured. */
+  email: { user: string; password: string } | null;
 }
 
 export function loadSecrets(env: NodeJS.ProcessEnv = process.env): Secrets {
@@ -126,5 +142,7 @@ export function loadSecrets(env: NodeJS.ProcessEnv = process.env): Secrets {
     if (!/^\d+$/.test(s)) throw new Error(`TELEGRAM_ALLOWED_USER_IDS contains a non-numeric value: "${s}"`);
     return Number(s);
   });
-  return { botToken, allowedUserIds };
+  const user = (env.EMAIL_USER ?? '').trim();
+  const password = (env.EMAIL_PASSWORD ?? '').trim();
+  return { botToken, allowedUserIds, email: user && password ? { user, password } : null };
 }

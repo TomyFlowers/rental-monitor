@@ -247,6 +247,25 @@ export class Store {
       .map((r) => toRow(r as Raw));
   }
 
+  /** Active matches nobody has starred or ignored yet, best first. */
+  unrated(limit: number, exclude: ReadonlySet<number> = new Set()): ListingRow[] {
+    return this.db
+      .prepare(
+        `SELECT ${L_COLS} FROM listings l
+         WHERE l.status = 'active' AND l.verdict = 'match' AND l.user_state = 'none'
+         ORDER BY l.score DESC, l.first_seen DESC, l.id DESC LIMIT ?`,
+      )
+      .all(limit + exclude.size)
+      .map((r) => toRow(r as Raw))
+      .filter((r) => !exclude.has(r.id))
+      .slice(0, limit);
+  }
+
+  unratedCount(): number {
+    const r = this.db.prepare("SELECT COUNT(*) c FROM listings WHERE status = 'active' AND verdict = 'match' AND user_state = 'none'").get() as Raw;
+    return Number(r.c);
+  }
+
   favorites(): ListingRow[] {
     return this.db
       .prepare(`SELECT ${L_COLS} FROM listings l WHERE l.user_state = 'favorite' ORDER BY l.status ASC, l.score DESC`)

@@ -1,4 +1,5 @@
-# Rental monitor configuration. 
+# Rental monitor configuration. No secrets here: the Telegram token and
+# allowed user IDs live in .env. Everything below is validated on startup;
 # a typo stops the app with a message saying which field is wrong.
 
 timezone: Europe/Lisbon
@@ -19,8 +20,16 @@ sources:
     searches:
       - https://www.imovirtual.com/pt/resultados/arrendar/apartamento/porto/porto?ownerTypeSingleSelect=ALL&priceMax=1300&by=LATEST&direction=DESC
       - https://www.imovirtual.com/pt/resultados/arrendar/apartamento/porto/vila-nova-de-gaia?ownerTypeSingleSelect=ALL&priceMax=1300&by=LATEST&direction=DESC
-  olx:
+  casasapo:
     enabled: true
+    maxPages: 3
+    firstRunMaxPages: 8
+    searches:
+      - https://casa.sapo.pt/alugar-apartamentos/mais-recentes/porto/
+  olx:
+    # OLX refuses automated requests (HTTP 403), for pages and for its API.
+    # Its listings come in through alert emails instead: see `email:` below.
+    enabled: false
     maxPages: 3
     firstRunMaxPages: 8
     searches:
@@ -100,10 +109,26 @@ notifications:
   maxDigestItems: 15
   topPicks: 5
   photos: 4
+  ratePhotos: 3              # photos per listing in /rate
   firstRun: digest           # digest | instant  (digest avoids a flood on day one)
   delistCheck:
     perRun: 10               # tracked listings re-checked per run
     confirmations: 2         # consecutive "gone" results before reporting removal
+
+# Saved-search alert emails, for sites that refuse automated requests
+# (Idealista, OLX). Create a mailbox used only for this, save your searches on
+# each site with email alerts sent to it, and put EMAIL_USER / EMAIL_PASSWORD
+# in .env. Searches to save:
+#   Idealista: https://www.idealista.pt/arrendar-casas/porto/com-t1,t2,t3,t4-t5/
+#   OLX:       the search URL under sources.olx above
+email:
+  enabled: false
+  host: imap.gmail.com       # Gmail needs an "app password", not the account password
+  port: 993
+  folder: INBOX
+  senders: [idealista.pt, idealista.com, olx.pt, imovirtual.com, sapo.pt]
+  maxMessagesPerRun: 30
+  markRead: true             # alert emails are marked read once processed
 
 health:
   failureThreshold: 3        # consecutive failed/empty runs before you are alerted

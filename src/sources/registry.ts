@@ -1,4 +1,5 @@
 import type { HttpClient } from '../http/client.js';
+import { CasaSapoAdapter } from './casasapo/index.js';
 import { ImovirtualAdapter } from './imovirtual/index.js';
 import { OlxAdapter } from './olx/index.js';
 import type { SourceAdapter } from './types.js';
@@ -9,5 +10,5 @@ import type { SourceAdapter } from './types.js';
  * under `sources:` in the config.
  */
 export function createAdapters(http: HttpClient): SourceAdapter[] {
-  return [new ImovirtualAdapter(http), new OlxAdapter(http)];
+  return [new ImovirtualAdapter(http), new OlxAdapter(http), new CasaSapoAdapter(http)];
 }

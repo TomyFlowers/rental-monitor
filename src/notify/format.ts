@@ -2,7 +2,7 @@ import type { EventRow, ListingRow, RunRow } from '../store/db.js';
 
 export const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-const SOURCE_NAMES: Record<string, string> = { imovirtual: 'Imovirtual', olx: 'OLX', manual: 'added by hand' };
+const SOURCE_NAMES: Record<string, string> = { imovirtual: 'Imovirtual', olx: 'OLX', casasapo: 'Casa Sapo', idealista: 'Idealista', email: 'Email alerts', manual: 'added by hand' };
 const sourceName = (s: string) => SOURCE_NAMES[s] ?? s;
 const euro = (n: number) => `€${Math.round(n).toLocaleString('en-US')}`;
 const trim = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);

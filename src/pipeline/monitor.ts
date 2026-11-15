@@ -1,13 +1,19 @@
 import { createHash } from 'node:crypto';
 import type { Config } from '../config.js';
 import { evaluate } from '../core/evaluator.js';
-import { findEuroAmount, norm, parseArea, parseTypology } from '../core/text.js';
+import { findEuroAmount, guessMunicipality, parseArea, parseTypology } from '../core/text.js';
 import { emptyListing, type Delivery, type Listing } from '../core/types.js';
 import type { Enricher } from '../enrich/commute.js';
 import { HttpError } from '../http/client.js';
 import type { Logger } from '../logger.js';
 import type { ListingRow, Store } from '../store/db.js';
 import { applyText, type SourceAdapter } from '../sources/types.js';
+
+/** A source that is not a website to search, e.g. alert emails in a mailbox. */
+export interface ListingFeed {
+  readonly name: string;
+  fetch(now: Date): Promise<{ listings: Listing[]; note: string | null }>;
+}
 
 export interface RunSummary {
   source: string;
@@ -50,6 +56,7 @@ export class Monitor {
     private enricher: Enricher,
     private log: Logger,
     private clock: () => Date = () => new Date(),
+    private feeds: ListingFeed[] = [],
   ) {}
 
   private iso(): string {
@@ -76,7 +83,13 @@ export class Monitor {
         anyFirstRun ||= firstRun;
         summaries.push(await this.searchSource(adapter, sc, firstRun));
       }
+      for (const feed of this.feeds) {
+        anyFirstRun ||= !this.store.hasSuccessfulRun(feed.name);
+        summaries.push(await this.readFeed(feed));
+      }
       for (const adapter of this.adapters) {
+        // A disabled source (e.g. a site that refuses requests) is left alone entirely.
+        if (!this.cfg.sources[adapter.name]?.enabled) continue;
         await this.detailsPhase(adapter);
         await this.delistPhase(adapter, startedAt);
       }
@@ -136,6 +149,28 @@ export class Monitor {
     }
     this.store.recordRun({ source: s.source, startedAt, ok: s.ok, found: s.found, fresh: s.fresh, note: s.note });
     this.log.info({ ...s }, 'source checked');
+    return s;
+  }
+
+  private async readFeed(feed: ListingFeed): Promise<RunSummary> {
+    const s: RunSummary = { source: feed.name, ok: true, found: 0, fresh: 0, mode: 'structured', blocked: false, note: null };
+    const startedAt = this.iso();
+    try {
+      const res = await feed.fetch(this.clock());
+      s.note = res.note;
+      for (const l of res.listings) {
+        const { isNew } = await this.process(l);
+        s.found++;
+        if (isNew) s.fresh++;
+      }
+    } catch (err) {
+      // Unlike a website, an empty feed is normal; only a failure to read it counts.
+      s.ok = false;
+      s.note = err instanceof Error ? err.message : String(err);
+      this.log.warn({ source: feed.name, err: s.note }, 'feed failed');
+    }
+    this.store.recordRun({ source: s.source, startedAt, ok: s.ok, found: s.found, fresh: s.fresh, note: s.note });
+    this.log.info({ ...s }, 'feed checked');
     return s;
   }
 
@@ -287,12 +322,7 @@ export class Monitor {
     l.price = findEuroAmount(note);
     l.typology = parseTypology(note);
     l.areaM2 = parseArea(note);
-    const n = norm(note);
-    for (const m of this.cfg.criteria.municipalities) {
-      const last = norm(m).split(' ').pop() ?? '';
-      const hit = n.includes(norm(m)) || (last.length >= 4 && new RegExp(`\\b${last}\\b`).test(n));
-      if (hit && (l.municipality === null || norm(m).length > norm(l.municipality).length)) l.municipality = m;
-    }
+    l.municipality = guessMunicipality(note, this.cfg.criteria.municipalities);
     l = applyText(l, '', this.clock());
     l.detailsFetched = true;
     return l;

@@ -117,3 +117,49 @@ export function spacedText($: CheerioAPI, root: Cheerio<any>): string {
     });
   return out.join(' ');
 }
+
+export interface ListingRef {
+  source: string;
+  sourceId: string;
+  url: string;
+}
+
+/**
+ * Groups a page's links by the listing they point to and finds each listing's
+ * "card": the largest element that contains links to that listing and to no
+ * other. Works without knowing the site's class names, so it survives
+ * restyling, and it is how alert emails (nested tables) are read too.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function cardsByListing($: CheerioAPI, identify: (href: string) => ListingRef | null): Array<{ ref: ListingRef; card: Cheerio<any>; anchors: Cheerio<any> }> {
+  const keyOf = new Map<unknown, string>();
+  const refs = new Map<string, ListingRef>();
+  $('a[href]').each((_, a) => {
+    const ref = identify($(a).attr('href') ?? '');
+    if (!ref) return;
+    const key = `${ref.source}:${ref.sourceId}`;
+    keyOf.set(a, key);
+    if (!refs.has(key)) refs.set(key, ref);
+  });
+  const out: Array<{ ref: ListingRef; card: Cheerio<any>; anchors: Cheerio<any> }> = [];
+  const done = new Set<string>();
+  $('a[href]').each((_, a) => {
+    const key = keyOf.get(a);
+    if (!key || done.has(key)) return;
+    done.add(key);
+    let card = $(a);
+    for (;;) {
+      const parent = card.parent();
+      if (!parent.length || parent.is('body, html')) break;
+      const foreign = parent
+        .find('a[href]')
+        .toArray()
+        .some((el) => keyOf.has(el) && keyOf.get(el) !== key);
+      if (foreign) break;
+      card = parent;
+    }
+    const anchors = card.find('a[href]').addBack('a[href]').filter((_i, el) => keyOf.get(el) === key);
+    out.push({ ref: refs.get(key)!, card, anchors });
+  });
+  return out;
+}

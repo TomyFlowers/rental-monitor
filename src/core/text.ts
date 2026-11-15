@@ -115,9 +115,9 @@ export interface TextFeatures {
 }
 
 const SHORT_TERM =
-  /curta duracao|curto prazo|curtos periodos|temporada|sazonal|arrendamento temporario|alojamento local|short[- ]term|holiday rental|(?:para|de|casa de) ferias|(?:por|\/|ao|a) ?(?:noite|dia|semana)\b|(?:so |apenas |somente )?ate (?:ao )?(?:fim|final|inicio|meados)? ?(?:de |do mes de )?(?:janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)|contrato (?:de |maximo de |max\.? )?(?:[1-9]|1[01]) meses|maximo (?:de )?(?:[1-9]|1[01]) meses|erasmus/;
+  /curta duracao|curto prazo|curtos periodos|temporada|sazonal|arrendamento temporario|alojamento local|short[- ]term|holiday rental|(?:para|de|casa de) ferias|(?:por|\/|ao|a) ?(?:noite|dia|semana)\b|(?:so |apenas |somente )?ate (?:ao )?(?:fim|final|inicio|meados)? ?(?:de |do mes de )?(?:janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)|contrato (?:de arrendamento )?(?:de |maximo de |max\.? )?(?:[1-9]|1[01]) meses|maximo (?:de )?(?:[1-9]|1[01]) meses|erasmus/;
 const LONG_TERM =
-  /longa duracao|longo prazo|long[- ]term|contrato (?:de |minimo de |min\.? )?(?:1|um|2|dois|3|tres|5|cinco) anos?|contrato anual|minimo (?:de )?(?:1|um|12) (?:ano|meses)/;
+  /longa duracao|longo prazo|long[- ]term|contrato (?:de arrendamento )?(?:de |minimo de |min\.? )?(?:1|um|2|dois|3|tres|5|cinco) anos?|contrato anual|minimo (?:de )?(?:1|um|12) (?:ano|meses)/;
 const SHARED_TITLE = /^\W*(?:aluga-?se |arrenda-?se |arrendo |alugo |disponivel )?(?:\d+ )?quartos?\b(?! de banho)/;
 const SHARED_TEXT =
   /quarto (?:em|num|numa) (?:apartamento|casa|moradia|t\d)|quartos? para (?:estudante|rapariga|rapaz|senhora|menina|trabalhador|casal)|(?:casa|apartamento|moradia|habitacao) partilhad|partilha de (?:casa|apartamento)|room in (?:a )?shared|co-?living|residencia (?:de estudantes|universitaria)/;
@@ -165,4 +165,20 @@ export function extractFeatures(title: string | null, body: string | null, now: 
   else if (/com contrato|contrato de arrendamento|contrato registado|registado nas financas|recibos? (?:de renda|eletronico|electronico)|com recibos?|passa-?se recibo|morada fiscal/.test(all)) registration = true;
 
   return { furnished, garage, outdoor, elevator, shortTerm, sharedRoom, registration, availableFrom: parseAvailableFrom(all, now) };
+}
+
+/**
+ * Finds which of the given municipality names a piece of free text mentions
+ * ("T2 em Gaia" -> "Vila Nova de Gaia"). The longest matching name wins.
+ */
+export function guessMunicipality(text: string | null | undefined, municipalities: string[]): string | null {
+  const n = norm(text);
+  let best: string | null = null;
+  for (const m of municipalities) {
+    const name = norm(m);
+    const last = name.split(' ').pop() ?? '';
+    const hit = new RegExp(`\\b${name}\\b`).test(n) || (last.length >= 4 && new RegExp(`\\b${last}\\b`).test(n));
+    if (hit && (best === null || name.length > norm(best).length)) best = m;
+  }
+  return best;
 }

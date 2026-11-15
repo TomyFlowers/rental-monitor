@@ -1,4 +1,5 @@
 import { Bot, InlineKeyboard, InputMediaBuilder, type Context } from 'grammy';
+import type { UserFromGetMe } from 'grammy/types';
 import type { Config, Secrets } from '../config.js';
 import type { Logger } from '../logger.js';
 import { UserError, type Monitor, type RunSummary } from '../pipeline/monitor.js';
@@ -17,9 +18,11 @@ export interface BotHooks {
 const HELP = [
   '<b>Rental monitor</b>',
   '/status – what the monitor is doing',
+  '/rate – go through matches you have not rated yet, one at a time',
   '/top – best current matches',
   '/favorites – listings you starred',
   '/add &lt;link&gt; [notes] – score a listing you found yourself (e.g. on Facebook: <code>/add https://… T2 900€ Gaia mobilado</code>)',
+  'Or just paste a link (with optional notes) without any command.',
   '/check – check all sites now',
   '/pause – stop checks and messages',
   '/resume – start again',
@@ -34,18 +37,27 @@ export function keyboard(row: ListingRow): InlineKeyboard {
   return kb.url('🔗 Open', row.listing.url);
 }
 
+/** Buttons for the /rate flow: every press moves on to the next listing. */
+export function rateKeyboard(row: ListingRow): InlineKeyboard {
+  return new InlineKeyboard().text('⭐ Favorite', `rf:${row.id}`).text('🚫 Ignore', `ri:${row.id}`).text('⏭ Skip', `rs:${row.id}`).row().url('🔗 Open', row.listing.url);
+}
+
 /** The Telegram side: delivers messages to every allowed user and handles commands and buttons. */
 export class TelegramBot implements Notifier {
   readonly bot: Bot;
   private hooks: BotHooks | null = null;
+  /** Listings each chat skipped in its current /rate round (cleared by /rate). */
+  private skipped = new Map<number, Set<number>>();
 
   constructor(
     private secrets: Secrets,
     private cfg: Config,
     private store: Store,
     private log: Logger,
+    /** Supplied by tests so the bot does not ask Telegram who it is. */
+    botInfo?: UserFromGetMe,
   ) {
-    this.bot = new Bot(secrets.botToken);
+    this.bot = new Bot(secrets.botToken, botInfo ? { botInfo } : undefined);
     this.register();
   }
 
@@ -56,6 +68,7 @@ export class TelegramBot implements Notifier {
   async start(): Promise<void> {
     const commands = [
       { command: 'status', description: 'What the monitor is doing' },
+      { command: 'rate', description: 'Rate matches one at a time' },
       { command: 'top', description: 'Best current matches' },
       { command: 'favorites', description: 'Listings you starred' },
       { command: 'add', description: 'Score a listing from a link' },
@@ -106,7 +119,7 @@ export class TelegramBot implements Notifier {
     await this.broadcast((id) => this.sendCard(id, row, html, photos));
   }
 
-  private async sendCard(chatId: number, row: ListingRow, html: string, photos: string[]): Promise<void> {
+  private async sendCard(chatId: number, row: ListingRow, html: string, photos: string[], buttons: InlineKeyboard = keyboard(row)): Promise<void> {
     // Telegram albums cannot carry buttons, so the album goes first and the
     // text with buttons follows. If Telegram cannot fetch the photos, the
     // text is still sent.
@@ -116,7 +129,22 @@ export class TelegramBot implements Notifier {
     } catch (err) {
       this.log.debug({ err: String(err), listing: row.listing.url }, 'photos could not be sent');
     }
-    await this.bot.api.sendMessage(chatId, html, { parse_mode: 'HTML', reply_markup: keyboard(row), link_preview_options: { is_disabled: true } });
+    await this.bot.api.sendMessage(chatId, html, { parse_mode: 'HTML', reply_markup: buttons, link_preview_options: { is_disabled: true } });
+  }
+
+  /** Sends the best listing this chat has not rated or skipped yet, or says there is none left. */
+  private async sendNextToRate(chatId: number): Promise<void> {
+    const skipped = this.skipped.get(chatId) ?? new Set<number>();
+    const row = this.store.unrated(1, skipped)[0];
+    if (!row) {
+      const all = this.store.unratedCount();
+      await this.bot.api.sendMessage(chatId, all > 0 ? `That is everything except the ${all} you skipped. Send /rate to go through those again.` : '✅ Nothing left to rate. New matches will show up here as they are found.');
+      return;
+    }
+    const left = this.store.unratedCount() - skipped.size;
+    const html = alertHtml({ type: 'new', payload: {}, row }, this.cfg.commute.destination.name).replace(/^.*\n/, `🗳 <b>To rate · ${left} left · ${Math.round(row.evaluation.score)}/100</b>\n`);
+    await this.sendCard(chatId, row, html, row.listing.images.slice(0, this.cfg.notifications.ratePhotos), rateKeyboard(row));
+    this.store.markNotified(row.id); // it has been shown, so later changes to it are reported
   }
 
   // --- Commands and buttons --------------------------------------------------
@@ -142,6 +170,29 @@ export class TelegramBot implements Notifier {
 
     this.bot.command('status', (ctx) => ctx.reply(this.statusHtml(), { parse_mode: 'HTML' }));
 
+    this.bot.command('rate', async (ctx) => {
+      this.skipped.delete(ctx.chat.id);
+      await this.sendNextToRate(ctx.chat.id);
+    });
+
+    this.bot.callbackQuery(/^r([fis]):(\d+)$/, async (ctx) => {
+      const action = ctx.match[1];
+      const id = Number(ctx.match[2]);
+      const chatId = ctx.chat?.id ?? ctx.from.id;
+      if (!this.store.byId(id)) return ctx.answerCallbackQuery({ text: 'That listing is no longer in the database.' });
+      if (action === 's') {
+        if (!this.skipped.has(chatId)) this.skipped.set(chatId, new Set());
+        this.skipped.get(chatId)!.add(id);
+        await ctx.answerCallbackQuery({ text: 'Skipped for now' });
+      } else {
+        this.store.setUserState(id, action === 'f' ? 'favorite' : 'ignored');
+        await ctx.answerCallbackQuery({ text: action === 'f' ? 'Added to favourites' : 'Ignored' });
+      }
+      // The card keeps the ordinary buttons, so the choice can still be undone or made later.
+      await this.refreshButtons(ctx, id);
+      await this.sendNextToRate(chatId);
+    });
+
     this.bot.command('top', async (ctx) => {
       const rows = this.store.topPicks(10);
       if (rows.length === 0) return ctx.reply('No matching listings yet.');
@@ -163,9 +214,9 @@ export class TelegramBot implements Notifier {
       await ctx.reply(lines.join('\n') || 'No sources are enabled.', { parse_mode: 'HTML' });
     });
 
-    this.bot.command('add', async (ctx) => {
-      if (!this.hooks) return;
-      const [link, ...rest] = ctx.match.trim().split(/\s+/);
+    const add = async (ctx: Context, input: string) => {
+      if (!this.hooks || !ctx.chat) return;
+      const [link, ...rest] = input.trim().split(/\s+/);
       if (!link) return ctx.reply('Usage: /add <link> [notes]\nExample: /add https://facebook.com/… T2 900€ Gaia mobilado com garagem');
       try {
         const row = await this.hooks.monitor.addByUrl(link, rest.join(' '));
@@ -176,7 +227,10 @@ export class TelegramBot implements Notifier {
         this.log.warn({ err: String(err) }, '/add failed');
         await ctx.reply('Could not read that link (the site did not answer or refused the request).');
       }
-    });
+    };
+    this.bot.command('add', (ctx) => add(ctx, ctx.match));
+    // A pasted link, with or without notes after it, works like /add.
+    this.bot.hears(/^https?:\/\/\S+/i, (ctx) => add(ctx, ctx.message?.text ?? ''));
 
     this.bot.callbackQuery(/^([fiu]):(\d+)$/, async (ctx) => {
       const action = ctx.match[1];
@@ -217,6 +271,10 @@ export class TelegramBot implements Notifier {
       '',
       '<b>Sources</b>',
     ];
+    if (this.cfg.email.enabled) {
+      const last = this.store.recentRuns('email', 1)[0];
+      lines.push(last ? `• email alerts: ${last.ok ? '✅' : '⚠️'} ${fmt(last.startedAt)}, ${last.found} read, ${last.fresh} new${last.note ? `\n   <i>${esc(last.note.slice(0, 200))}</i>` : ''}` : '• email alerts: not checked yet');
+    }
     for (const [name, sc] of Object.entries(this.cfg.sources)) {
       if (!sc.enabled) {
         lines.push(`• ${esc(name)}: disabled`);

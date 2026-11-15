@@ -50,7 +50,13 @@ export class CommuteEnricher implements Enricher {
   private async geocode(l: Listing): Promise<{ lat: number; lon: number } | null> {
     const parts = [l.parish, l.municipality].filter(Boolean);
     if (parts.length === 0) return null;
-    const query = `${parts.join(', ')}, Portugal`;
+    const precise = await this.lookup(`${parts.join(', ')}, Portugal`);
+    // Some sites give long compound parish names the geocoder does not know.
+    if (precise || !l.parish || !l.municipality) return precise;
+    return this.lookup(`${l.municipality}, Portugal`);
+  }
+
+  private async lookup(query: string): Promise<{ lat: number; lon: number } | null> {
     const key = norm(query);
     const cached = this.store.geoGet(key);
     if (cached !== undefined) return cached;

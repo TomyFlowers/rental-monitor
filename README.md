@@ -1,6 +1,7 @@
 # Rental monitor
 
-Checks rental listings on Imovirtual and OLX every hour, scores each one
+Checks rental listings on Imovirtual and Casa Sapo every hour, reads Idealista
+and OLX alert emails, scores each one
 against your criteria, and sends the good ones to a private Telegram bot.
 
 - **Great matches** (score 75+) arrive at once, with up to 4 photos and
@@ -77,14 +78,48 @@ shows up in `/top` and in the 19:00 digest.
 | Command | What it does |
 |---|---|
 | `/status` | Running or paused, counts, last result per site, next check |
+| `/rate` | Shows the best match you have not rated yet with ⭐ Favorite / 🚫 Ignore / ⏭ Skip; each press brings the next one. Skipped ones return on the next `/rate` |
 | `/top` | Ten best current matches |
 | `/favorites` | Listings you starred |
 | `/add <link> [notes]` | Scores a listing you found yourself. Imovirtual and OLX links are read from the site. For anything else (Facebook), type the facts after the link: `/add https://facebook.com/... T2 900€ Gaia mobilado com garagem` |
+| *(a pasted link)* | Same as `/add`, without typing the command |
 | `/check` | Check all sites now |
 | `/pause`, `/resume` | Stop and restart checks and messages |
 
 Favourites and ignores are shared by everyone on the allow list. An ignored
 listing never produces another message.
+
+## Sources
+
+| Site | How | Notes |
+|---|---|---|
+| Imovirtual | Reads the results pages and listing pages | |
+| Casa Sapo | Reads the results pages | Facts come from the result card (price, typology, area, location, description excerpt) |
+| Idealista, OLX | Alert emails | Both refuse automated page requests, so the monitor reads the alerts the sites send you |
+| Facebook | By hand | Paste the post link plus the facts into the bot |
+
+### Setting up alert emails (Idealista, OLX)
+
+1. Create a mailbox used only for this (a new Gmail works). For Gmail, turn
+   on 2-step verification and create an **app password**.
+2. On each site, register with that address, run your search, save it, and
+   turn on email alerts for new listings (choose the most frequent option).
+3. In `.env`, set `EMAIL_USER` and `EMAIL_PASSWORD`. In `config.yaml`, set
+   `email.enabled: true`.
+4. Once an alert has arrived, check what the monitor makes of it:
+
+   ```bash
+   sudo docker compose run --rm rental-monitor node dist/cli/probe.js email
+   ```
+
+   It lists each unread message, how many links it holds and which listings
+   were recognised, and leaves the messages unread. Add `--save` to keep the
+   raw emails in `data/probe/`.
+
+Listings from email carry only what the email says (usually title, price and
+a photo), so more of their values are flagged unknown. They cannot be checked
+for removal. Mail from senders not listed in `email.senders` is never opened
+or marked read.
 
 ## How listings are judged
 
@@ -144,15 +179,16 @@ Scoring, storage, change detection and notifications need no changes.
 
 ```bash
 pnpm install
-pnpm test          # 89 tests: text extraction, scoring, parsers, full pipeline
+pnpm test          # 104 tests: text extraction, scoring, parsers, bot, full pipeline
 pnpm typecheck
 pnpm dev           # run from source (needs .env)
 ```
 
 ## Not in this version
 
-- Idealista, Casa Sapo, SUPERCASA adapters.
-- Facebook Marketplace/groups monitoring (use `/add`).
+- SUPERCASA adapter.
+- Automated Facebook Marketplace/groups monitoring (paste links instead).
+- Rating buttons on digest and `/top` lines (use `/rate`).
 - Public-transport commute time.
 - Merging the same flat posted separately on two sites. (OLX ads that link
   to Imovirtual are already merged.)
