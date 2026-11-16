@@ -5,7 +5,7 @@ import type { Logger } from '../logger.js';
 import { UserError, type Monitor, type RunSummary } from '../pipeline/monitor.js';
 import type { ListingRow, Store, UserState } from '../store/db.js';
 import type { Dispatcher, Notifier } from './dispatcher.js';
-import { alertHtml, digestLine, esc } from './format.js';
+import { alertHtml, digestLine, esc, listEntry } from './format.js';
 
 export interface BotHooks {
   monitor: Monitor;
@@ -208,11 +208,11 @@ export class TelegramBot implements Notifier {
       await ctx.reply(['<b>Top matches</b>', ...rows.map((r, i) => digestLine(r, `${i + 1}. `))].join('\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
     });
 
-    const list = async (ctx: Context, rows: ListingRow[], title: string, empty: string, line: (row: ListingRow) => string = (r) => digestLine(r, r.status === 'removed' ? '❌ ' : '')) => {
+    const list = async (ctx: Context, rows: ListingRow[], title: string, empty: string, line: (row: ListingRow) => string = (r) => listEntry(r)) => {
       if (rows.length === 0) return ctx.reply(empty);
       const shown = rows.slice(0, 25);
       const head = `<b>${title} (${rows.length})</b>${rows.length > shown.length ? ` – first ${shown.length}` : ''}\nTap a /show link to open a listing with its buttons.`;
-      await ctx.reply([head, ...shown.map(line)].join('\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
+      await ctx.reply([head, ...shown.map(line)].join('\n\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
     };
     this.bot.command('favorites', (ctx) => list(ctx, this.store.favorites(), 'Favourites', 'No favourites yet. Tap ⭐ on a listing to add one.'));
     this.bot.command('ignored', (ctx) => list(ctx, this.store.ignored(), 'Ignored', 'Nothing is ignored.'));

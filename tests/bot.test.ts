@@ -105,6 +105,8 @@ describe('lists and editing', () => {
     await say('/favorites');
     expect(sent('sendMessage')).toHaveLength(1); // one message, not one per listing
     expect(lastCard().text).toContain('Favourites (2)');
+    expect(lastCard().text).toContain('⭐ <b>T2 · €900</b> · Mafamude, Gaia\n'); // short town name, no score or driving time
+    expect(lastCard().text).not.toContain('🚗');
     expect(lastCard().text).toContain(`/show_${a}`);
     expect(lastCard().text).toContain(`/show_${b}`);
 
