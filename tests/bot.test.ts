@@ -111,6 +111,8 @@ describe('lists and editing', () => {
     await say('/favorites');
     expect(sent('sendMessage')).toHaveLength(1); // one message, not one per listing
     expect(lastCard().text).toContain('Favourites (2)');
+    expect(lastCard().text).toContain('⭐ <b>T2 · €900</b> · Mafamude, Gaia\n'); // short town name, no score or driving time
+    expect(lastCard().text).not.toContain('🚗');
     expect(lastCard().text).toContain(`/show_${a}`);
     expect(lastCard().text).toContain(`/show_${b}`);
 
@@ -155,6 +157,19 @@ describe('contact tracking', () => {
     expect(store.byId(a)!.stage).toBe('contacted');
     await press(`x:${a}`);
     expect(store.byId(a)).toMatchObject({ stage: 'none', contactedAt: null, userState: 'favorite' });
+  });
+
+  it('groups the favourites list by stage, furthest along first', async () => {
+    const plain = add('plain');
+    const called = add('called');
+    const visit = add('visit');
+    store.setUserState(plain, 'favorite');
+    store.setStage(called, 'contacted', '2026-11-14T10:00:00Z');
+    store.setStage(visit, 'visit', '2026-11-15T10:00:00Z');
+    await say('/favorites');
+    const text: string = lastCard().text;
+    expect(text).toMatch(/📅 Visit booked \(1\)[\s\S]*example\.test\/visit[\s\S]*📞 Contacted \(1\)[\s\S]*example\.test\/called[\s\S]*⭐ Not contacted yet \(1\)[\s\S]*example\.test\/plain/);
+    expect(text).toContain('📞 <b>T2 · €900</b> · Mafamude, Gaia');
   });
 
   it('stars a listing when it is marked contacted, and clears the stage when un-starred', async () => {

@@ -5,7 +5,7 @@ import type { Logger } from '../logger.js';
 import { UserError, type Monitor, type RunSummary } from '../pipeline/monitor.js';
 import type { ListingRow, Store, UserState } from '../store/db.js';
 import type { Dispatcher, Notifier } from './dispatcher.js';
-import { ago, alertHtml, digestLine, esc } from './format.js';
+import { ago, alertHtml, digestLine, esc, listEntry } from './format.js';
 
 export interface BotHooks {
   monitor: Monitor;
@@ -225,19 +225,35 @@ export class TelegramBot implements Notifier {
       await ctx.reply(['<b>Top matches</b>', ...rows.map((r, i) => digestLine(r, `${i + 1}. `))].join('\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
     });
 
-    const list = async (ctx: Context, rows: ListingRow[], title: string, empty: string, line: (row: ListingRow) => string = (r) => digestLine(r, r.status === 'removed' ? '❌ ' : '')) => {
+    const list = async (ctx: Context, rows: ListingRow[], title: string, empty: string, line: (row: ListingRow) => string = (r) => listEntry(r)) => {
       if (rows.length === 0) return ctx.reply(empty);
       const shown = rows.slice(0, 25);
       const head = `<b>${title} (${rows.length})</b>${rows.length > shown.length ? ` – first ${shown.length}` : ''}\nTap a /show link to open a listing with its buttons.`;
-      await ctx.reply([head, ...shown.map(line)].join('\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
+      await ctx.reply([head, ...shown.map(line)].join('\n\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
     };
-    this.bot.command('favorites', (ctx) => list(ctx, this.store.favorites(), 'Favourites', 'No favourites yet. Tap ⭐ on a listing to add one.'));
+    // Favourites are grouped by how far each has got, the furthest along first.
+    this.bot.command('favorites', async (ctx) => {
+      const rows = this.store.favorites();
+      if (rows.length === 0) return ctx.reply('No favourites yet. Tap ⭐ on a listing to add one.');
+      const shown = rows.slice(0, 25);
+      const groups = [
+        { title: '📅 Visit booked', rows: shown.filter((r) => r.stage === 'visit') },
+        { title: '📞 Contacted', rows: shown.filter((r) => r.stage === 'contacted') },
+        { title: '⭐ Not contacted yet', rows: shown.filter((r) => r.stage === 'none') },
+      ].filter((g) => g.rows.length > 0);
+      const blocks = [`<b>Favourites (${rows.length})</b>${rows.length > shown.length ? ` – first ${shown.length}` : ''}\nTap a /show link to open a listing with its buttons.`];
+      for (const g of groups) {
+        if (groups.length > 1) blocks.push(`<b>${g.title} (${g.rows.length})</b>`);
+        blocks.push(...g.rows.map((r) => listEntry(r)));
+      }
+      await ctx.reply(blocks.join('\n\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
+    });
     this.bot.command('ignored', (ctx) => list(ctx, this.store.ignored(), 'Ignored', 'Nothing is ignored.'));
     this.bot.command('contacted', (ctx) =>
       list(ctx, this.store.inProgress(), 'Contacted', 'Nothing in progress. Tap 📞 Contacted on a favourite once you have written or called.', (row) => {
         const what = row.stage === 'visit' ? `visit booked ${ago(row.stageAt ?? '', new Date())}` : `contacted ${ago(row.contactedAt ?? row.stageAt ?? '', new Date())}`;
         const note = this.store.notes(row.id, 1)[0];
-        return `${digestLine(row, row.status === 'removed' ? '❌ ' : '')}\n   ${what}${note ? ` · 📝 ${esc(note.text.slice(0, 80))}` : ''}`;
+        return `${listEntry(row)}\n${what}${note ? ` · 📝 ${esc(note.text.slice(0, 80))}` : ''}`;
       }),
     );
 

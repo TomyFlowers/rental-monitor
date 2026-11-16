@@ -93,6 +93,21 @@ export function digestLine(row: ListingRow, prefix = ''): string {
   return `${prefix}${bits.filter(Boolean).join(' · ')}\n   <a href="${esc(l.url)}">${esc(trim(l.title || 'Open listing', 60))}</a>`;
 }
 
+const SHORT_TOWNS: Record<string, string> = { 'Vila Nova de Gaia': 'Gaia' };
+
+/**
+ * A roomier entry for the favourites and ignored lists: status, typology,
+ * rent and area on one line, the title and its /show link on the next. The
+ * score and driving time are left out here; they are on the card.
+ */
+export function listEntry(row: ListingRow, icon = row.status === 'removed' ? '❌' : row.userState === 'ignored' ? '🚫' : row.stage === 'visit' ? '📅' : row.stage === 'contacted' ? '📞' : '⭐'): string {
+  const l = row.listing;
+  const facts = [l.typology === null ? null : `T${l.typology}`, l.price === null ? null : euro(l.price)].filter(Boolean).join(' · ') || 'Details not stated';
+  const town = l.municipality ? (SHORT_TOWNS[l.municipality] ?? l.municipality) : null;
+  const where = [l.parish ? trim(l.parish, 28) : null, town].filter(Boolean).join(', ') || 'location unknown';
+  return `${icon} <b>${esc(facts)}</b> · ${esc(where)}\n<a href="${esc(l.url)}">${esc(trim(l.title || 'Open listing', 55))}</a> · /show_${row.id}`;
+}
+
 export interface DigestInput {
   date: string;
   fresh: EventRow[];
