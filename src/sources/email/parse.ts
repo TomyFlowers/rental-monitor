@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import { emptyListing, type Listing } from '../../core/types.js';
 import { findEuroAmount, guessMunicipality, parseArea, parseTypology } from '../../core/text.js';
 import { identify as casaSapoRef } from '../casasapo/parse.js';
+import { identify as idealistaRef } from '../idealista/index.js';
 import { idFromUrl as imovirtualId } from '../imovirtual/parse.js';
 import { identify as olxRef } from '../olx/parse.js';
 import { applyText, cardsByListing, spacedText, type ListingRef } from '../types.js';
@@ -15,10 +16,7 @@ export function identifyListingUrl(href: string): ListingRef | null {
     return null;
   }
   const host = u.hostname.replace(/^www\./, '');
-  if (/(^|\.)idealista\.(pt|com)$/.test(host)) {
-    const id = /\/(?:imovel|inmueble|immobile)\/(\d+)/.exec(u.pathname)?.[1];
-    return id ? { source: 'idealista', sourceId: id, url: `https://www.idealista.pt/imovel/${id}/` } : null;
-  }
+  if (/(^|\.)idealista\.(pt|com)$/.test(host)) return idealistaRef(href);
   if (/(^|\.)imovirtual\.com$/.test(host)) {
     const id = imovirtualId(u.pathname);
     return id ? { source: 'imovirtual', sourceId: id, url: `${u.origin}${u.pathname}` } : null;

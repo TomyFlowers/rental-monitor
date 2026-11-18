@@ -316,14 +316,14 @@ describe('health alerts', () => {
 describe('/add', () => {
   it('reads a supported link from the site', async () => {
     site.pages.set('x9', great('x9'));
-    const row = await monitor.addByUrl('https://example.test/x9', '');
+    const { row } = await monitor.addByUrl('https://example.test/x9', '');
     expect(row.evaluation.score).toBe(100);
     await check();
     expect(tg.alerts).toHaveLength(0); // the reply to /add was the announcement
   });
 
   it('scores an unsupported link from the typed note', async () => {
-    const row = await monitor.addByUrl('https://www.facebook.com/marketplace/item/123', 'T2 900€ Gaia mobilado com garagem e varanda, com contrato');
+    const { row } = await monitor.addByUrl('https://www.facebook.com/marketplace/item/123', 'T2 900€ Gaia mobilado com garagem e varanda, com contrato');
     expect(row.listing).toMatchObject({ source: 'manual', price: 900, typology: 2, municipality: 'Vila Nova de Gaia', furnished: 'yes', garage: true, outdoor: true, registration: true });
     expect(row.evaluation.verdict).toBe('match');
   });

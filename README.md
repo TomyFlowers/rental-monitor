@@ -85,7 +85,7 @@ shows up in `/top` and in the 19:00 digest.
 | `/show_12` | Every line in a list, `/top` and the digest ends with a tappable `/show_<number>`. It opens that listing as a card with its buttons, which is where you change it |
 | `/note 12 text` | Adds a note to listing 12. Replying to a listing card with plain text does the same |
 | `/add <link> [notes]` | Scores a listing you found yourself. Imovirtual and OLX links are read from the site. For anything else (Facebook), type the facts after the link: `/add https://facebook.com/... T2 900€ Gaia mobilado com garagem` |
-| *(a pasted link)* | Same as `/add`, without typing the command |
+| *(a message with a link)* | Same as `/add`. The link can be anywhere in the message, and the text around it is read for details (see below) |
 | `/check` | Check all sites now |
 | `/pause`, `/resume` | Stop and restart checks and messages |
 
@@ -107,8 +107,26 @@ listing never produces another message.
 |---|---|---|
 | Imovirtual | Reads the results pages and listing pages | |
 | Casa Sapo | Reads the results pages | Facts come from the result card (price, typology, area, location, description excerpt) |
-| Idealista, OLX | Alert emails | Both refuse automated page requests, so the monitor reads the alerts the sites send you |
+| Idealista | Alert emails, and links you send | Refuses automated requests, so it is never contacted. Links you send are filed under their Idealista number, with details read from the text sent with them |
+| OLX | Alert emails | Refuses automated requests |
 | Facebook | By hand | Paste the post link plus the facts into the bot |
+
+### Adding listings by hand (Idealista, Facebook)
+
+Send the link to the bot together with the listing's text. Any of these work:
+
+- **Copy from the page**: select the title, location, price and the features
+  list, copy, and paste it into the chat along with the link.
+- **Share button**: share the listing from the site's app to Telegram. The
+  link can be anywhere in the message.
+- **Type it**: `T2 950€ Mafamude, Vila Nova de Gaia mobilado com garagem`.
+- **A screenshot** with the link as its caption becomes the listing's photo.
+
+Sending the same link again adds to what is known (new price, more
+features) instead of creating a second entry, so a bare link can be filled in
+later. The card's ⚠️ line shows what is still missing.
+
+Listings added by hand cannot be checked for price changes or removal.
 
 ### Setting up alert emails (Idealista, OLX)
 
@@ -196,7 +214,7 @@ Scoring, storage, change detection and notifications need no changes.
 
 ```bash
 pnpm install
-pnpm test          # 114 tests: text extraction, scoring, parsers, bot, full pipeline
+pnpm test          # 126 tests: text extraction, scoring, parsers, bot, full pipeline
 pnpm typecheck
 pnpm dev           # run from source (needs .env)
 ```

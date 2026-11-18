@@ -26,7 +26,7 @@ const HELP = [
   '/show_12 – tap one in any list to open that listing with its buttons',
   '/note 12 text – add a note (or just reply to a listing card)',
   '/add &lt;link&gt; [notes] – score a listing you found yourself (e.g. on Facebook: <code>/add https://… T2 900€ Gaia mobilado</code>)',
-  'Or just paste a link (with optional notes) without any command.',
+  'Or just send a link, with any text around it: the listing\'s title, price and features are read from that text (useful for Idealista, which cannot be read automatically). Sending the same link again adds to it.',
   '/check – check all sites now',
   '/pause – stop checks and messages',
   '/resume – start again',
@@ -297,12 +297,21 @@ export class TelegramBot implements Notifier {
 
     const add = async (ctx: Context, input: string) => {
       if (!this.hooks || !ctx.chat) return;
-      const [link, ...rest] = input.trim().split(/\s+/);
-      if (!link) return ctx.reply('Usage: /add <link> [notes]\nExample: /add https://facebook.com/… T2 900€ Gaia mobilado com garagem');
+      const m = /https?:\/\/[^\s<>"]+/i.exec(input);
+      if (!m) return ctx.reply('Usage: /add <link> [notes]\nExample: /add https://facebook.com/… T2 900€ Gaia mobilado com garagem');
+      const link = m[0].replace(/[),.;!?]+$/, '');
+      // Everything around the link is the note: typed facts, or text copied from the listing.
+      const note = `${input.slice(0, m.index)}\n${input.slice(m.index + m[0].length)}`.replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
+      // A photo sent with the link (a screenshot, say) becomes the listing's picture.
+      const photo = ctx.message?.photo?.at(-1)?.file_id;
       try {
-        const row = await this.hooks.monitor.addByUrl(link, rest.join(' '));
-        const html = alertHtml({ type: 'new', payload: {}, row }, this.cfg.commute.destination.name).replace(/^.*\n/, `📌 <b>Added by hand · ${Math.round(row.evaluation.score)}/100</b>\n`);
-        await this.sendCard(ctx.chat.id, row, html, row.listing.images.slice(0, this.cfg.notifications.photos));
+        const { row, updated } = await this.hooks.monitor.addByUrl(link, note, photo ? [photo] : []);
+        const head = updated ? '📌 <b>Updated' : '📌 <b>Added by hand';
+        const html = alertHtml({ type: 'new', payload: {}, row }, this.cfg.commute.destination.name).replace(/^.*\n/, `${head} · ${Math.round(row.evaluation.score)}/100</b>\n`);
+        const hint = row.evaluation.flags.some((f) => /^(Rent|Typology|Municipality) unknown/.test(f))
+          ? '\n\n<i>Missing details? Send the link again with the listing\'s text (title, price, features) and they will be filled in.</i>'
+          : '';
+        await this.sendCard(ctx.chat.id, row, html + hint, row.listing.images.slice(0, this.cfg.notifications.photos));
       } catch (err) {
         if (err instanceof UserError) return ctx.reply(err.message);
         this.log.warn({ err: String(err) }, '/add failed');
@@ -310,8 +319,9 @@ export class TelegramBot implements Notifier {
       }
     };
     this.bot.command('add', (ctx) => add(ctx, ctx.match));
-    // A pasted link, with or without notes after it, works like /add.
-    this.bot.hears(/^https?:\/\/\S+/i, (ctx) => add(ctx, ctx.message?.text ?? ''));
+    // A message (or a photo's caption) containing a link works like /add. The
+    // link can be anywhere, so the text an app's Share button produces works too.
+    this.bot.hears(/https?:\/\/\S+/i, (ctx) => add(ctx, ctx.message?.text ?? ctx.message?.caption ?? ''));
 
     this.bot.callbackQuery(/^([fiucvxy]):(\d+)$/, async (ctx) => {
       const action = ctx.match[1]!;

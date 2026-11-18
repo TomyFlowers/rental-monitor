@@ -218,6 +218,21 @@ describe('contact tracking', () => {
 });
 
 
+describe('links inside a message', () => {
+  it('finds the link anywhere in shared text and reads the details around it', async () => {
+    await say('Vê este anúncio: Apartamento T2 em Canidelo, Vila Nova de Gaia, 1.050 €/mês https://www.idealista.pt/imovel/123/?xtmc=share. Tem garagem');
+    const row = store.topPicks(1)[0]!;
+    expect(row.listing).toMatchObject({ source: 'manual', price: 1050, typology: 2, municipality: 'Vila Nova de Gaia', garage: true });
+    expect(row.listing.url).toBe('https://www.idealista.pt/imovel/123/?xtmc=share');
+    expect(lastCard().text).toContain('Added by hand');
+  });
+
+  it('suggests sending the text when the link alone gave nothing', async () => {
+    await say('https://www.facebook.com/groups/1984259601822354/posts/9');
+    expect(lastCard().text).toContain('Missing details?');
+  });
+});
+
 describe('pasted links', () => {
   it('treats a bare link with notes like /add', async () => {
     await say('https://www.facebook.com/groups/1984259601822354/posts/1 T2 900€ Gaia mobilado com garagem');

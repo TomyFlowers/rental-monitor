@@ -198,6 +198,25 @@ export class Store {
     this.db.prepare('INSERT INTO price_history (listing_id, price, at) VALUES (?, ?, ?)').run(id, price, at);
   }
 
+  bySource(source: string): ListingRow[] {
+    return this.db
+      .prepare(`SELECT ${L_COLS} FROM listings l WHERE l.source = ?`)
+      .all(source)
+      .map((r) => toRow(r as Raw));
+  }
+
+  /** Files a listing under another source and id. Returns false if that one already exists. */
+  rekey(id: number, source: string, sourceId: string, url: string): boolean {
+    if (this.find(source, sourceId)) return false;
+    this.db
+      .prepare(
+        `UPDATE listings SET source = ?, source_id = ?, url = ?,
+           data = json_set(data, '$.source', ?, '$.sourceId', ?, '$.url', ?) WHERE id = ?`,
+      )
+      .run(source, sourceId, url, source, sourceId, url, id);
+    return true;
+  }
+
   /** Un-starring a listing also clears its contact stage; ignoring keeps it as a record. */
   setUserState(id: number, state: UserState): void {
     if (state === 'none') this.db.prepare("UPDATE listings SET user_state = 'none', stage = 'none', stage_at = NULL WHERE id = ?").run(id);
