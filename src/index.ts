@@ -34,6 +34,8 @@ async function main(): Promise<void> {
   if (cfg.email.enabled && !secrets.email) throw new Error('email.enabled is true but EMAIL_USER / EMAIL_PASSWORD are not set (see .env.example)');
   const feeds = cfg.email.enabled && secrets.email ? [new EmailAlertFeed(cfg.email, cfg.criteria.municipalities, new ImapMailbox(cfg.email, secrets.email))] : [];
   const monitor = new Monitor(cfg, store, adapters, new CommuteEnricher(cfg.commute, http, store, log), log, undefined, feeds);
+  const adopted = monitor.adoptManualListings();
+  if (adopted > 0) log.info({ adopted }, 'filed hand-added links under their site');
   const telegram = new TelegramBot(secrets, cfg, store, log);
   const dispatcher = new Dispatcher(cfg, store, telegram, log);
   const health = new HealthMonitor(cfg.health, store, (html) => dispatcher.system(html));

@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import type { Config } from '../config.js';
 import { evaluate } from '../core/evaluator.js';
-import { findEuroAmount, guessMunicipality, parseArea, parseTypology } from '../core/text.js';
+import { findEuroAmount, guessMunicipality, norm, parseArea, parseTypology } from '../core/text.js';
 import { emptyListing, type Delivery, type Listing } from '../core/types.js';
 import type { Enricher } from '../enrich/commute.js';
 import { HttpError } from '../http/client.js';
 import type { Logger } from '../logger.js';
 import type { ListingRow, Store } from '../store/db.js';
+import { identifyListingUrl } from '../sources/email/parse.js';
 import { applyText, type SourceAdapter } from '../sources/types.js';
 
 /** A source that is not a website to search, e.g. alert emails in a mailbox. */
@@ -306,11 +307,13 @@ export class Monitor {
   }
 
   /**
-   * Adds a listing by hand (the /add command). Links from a supported site are
-   * read from the site; any other link (e.g. Facebook) is scored from the note
-   * typed after it, such as "T2 900€ Gaia mobilado com garagem".
+   * Adds a listing by hand (/add, or a link pasted into the chat). Links from
+   * a site that can be read are read from it. For any other link (Idealista,
+   * Facebook) the details come from the text sent with it, such as a copy of
+   * the listing's title, price and features. Sending the same link again adds
+   * to what is known instead of creating a second entry.
    */
-  async addByUrl(rawUrl: string, note: string): Promise<ListingRow> {
+  async addByUrl(rawUrl: string, note: string, images: string[] = []): Promise<{ row: ListingRow; updated: boolean }> {
     let url: URL;
     try {
       url = new URL(rawUrl);
@@ -327,28 +330,62 @@ export class Monitor {
       const res = await adapter.details(stub, this.clock());
       if (res.kind === 'gone') throw new UserError('That listing is no longer available.');
       listing = res.listing;
-      if (note) listing = applyText({ ...listing, description: `${listing.description ?? ''} . ${note}` }, '', this.clock());
       break;
     }
-    if (!listing) listing = this.manualListing(url, note);
+    if (!listing) {
+      const id = createHash('sha1').update(url.toString()).digest('hex').slice(0, 12);
+      listing = { ...emptyListing('manual', id, url.toString()), detailsFetched: true };
+    }
+
+    const prev = this.store.find(listing.source, listing.sourceId);
+    if (note) listing = this.fillFromNote(listing, note, prev?.listing ?? null);
+    if (!listing.title && !prev?.listing.title) listing.title = `Listing on ${url.hostname.replace(/^www\./, '')}`;
+    if (images.length > 0) listing.images = images;
 
     const { row } = await this.process(listing);
     this.store.markAnnounced(row.id); // the reply to /add is the announcement
     this.store.markNotified(row.id);
-    return this.store.byId(row.id)!;
+    return { row: this.store.byId(row.id)!, updated: prev !== null };
   }
 
-  private manualListing(url: URL, note: string): Listing {
-    const id = createHash('sha1').update(url.toString()).digest('hex').slice(0, 12);
-    let l = emptyListing('manual', id, url.toString());
-    l.title = note.slice(0, 120) || `Listing on ${url.hostname.replace(/^www\./, '')}`;
-    l.description = note || null;
-    l.price = findEuroAmount(note);
-    l.typology = parseTypology(note);
-    l.areaM2 = parseArea(note);
-    l.municipality = guessMunicipality(note, this.cfg.criteria.municipalities);
-    l = applyText(l, '', this.clock());
-    l.detailsFetched = true;
-    return l;
+  /**
+   * Fills the blanks of a listing from free text: a typed note ("T2 900€ Gaia
+   * com garagem") or text copied from the listing page or a share button.
+   * Values already known are only replaced when the text states a new one.
+   */
+  private fillFromNote(l: Listing, note: string, prev: Listing | null): Listing {
+    const text = note.trim();
+    const n = norm(text);
+    const out: Listing = { ...l };
+    // The first line is taken as the title, but never replaces an existing one.
+    const first = text.split('\n').map((s) => s.trim()).find((s) => /[a-zà-ú]{3}/i.test(s)) ?? '';
+    if (!out.title && !prev?.title && first) out.title = first.slice(0, 120);
+    out.description = [prev?.description, l.description, text].filter(Boolean).join(' . ') || null;
+    out.price = findEuroAmount(text) ?? out.price;
+    const bedrooms = /(?:^|[^\d])(\d)\s*quartos?\b(?!\s*de\s*banho)/.exec(n)?.[1];
+    out.typology = parseTypology(text) ?? (bedrooms ? Number(bedrooms) : null) ?? out.typology;
+    out.areaM2 = parseArea(text) ?? out.areaM2;
+    const town = guessMunicipality(text, this.cfg.criteria.municipalities);
+    if (town) {
+      out.municipality = town;
+      // "Mafamude e Vilar do Paraíso, Vila Nova de Gaia": the part before the town is the parish.
+      const parish = new RegExp(`([^,.;\\n]{3,60}),\\s*${town.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').exec(text)?.[1]?.trim();
+      if (parish && !/\d/.test(parish)) out.parish = parish.replace(/^.*\b(?:em|no|na|nos|nas)\s+/i, ''); // "Apartamento no Bonfim" -> "Bonfim"
+    }
+    return applyText(out, '', this.clock());
+  }
+
+  /**
+   * Earlier versions stored pasted links to Idealista (and other known sites)
+   * as hand-added entries. This files them under their site, so they match
+   * alert emails and later pastes of the same link. Returns how many moved.
+   */
+  adoptManualListings(): number {
+    let moved = 0;
+    for (const row of this.store.bySource('manual')) {
+      const ref = identifyListingUrl(row.listing.url);
+      if (ref && this.store.rekey(row.id, ref.source, ref.sourceId, ref.url)) moved++;
+    }
+    return moved;
   }
 }
