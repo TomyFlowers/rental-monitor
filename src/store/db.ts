@@ -59,8 +59,8 @@ CREATE TABLE IF NOT EXISTS commutecache (key TEXT PRIMARY KEY, minutes REAL, at 
 `;
 
 export type UserState = 'none' | 'favorite' | 'ignored';
-/** How far a favourite has got: nothing yet, landlord contacted, visit booked. */
-export type Stage = 'none' | 'contacted' | 'visit';
+/** How far a favourite has got: nothing yet, landlord contacted, visit booked, visited but not decided. */
+export type Stage = 'none' | 'contacted' | 'visit' | 'visited';
 
 export interface Note {
   author: string;

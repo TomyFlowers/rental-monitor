@@ -87,7 +87,7 @@ export function digestLine(row: ListingRow, prefix = ''): string {
     l.price === null ? null : euro(l.price),
     esc(trim(place(row), 40)),
     l.commuteMinutes === null ? null : `🚗${Math.round(l.commuteMinutes)}m`,
-    row.userState === 'favorite' ? (row.stage === 'visit' ? '📅' : row.stage === 'contacted' ? '📞' : '⭐') : null,
+    row.userState === 'favorite' ? (row.stage === 'visited' ? '👀' : row.stage === 'visit' ? '📅' : row.stage === 'contacted' ? '📞' : '⭐') : null,
     `/show_${row.id}`,
   ];
   return `${prefix}${bits.filter(Boolean).join(' · ')}\n   <a href="${esc(l.url)}">${esc(trim(l.title || 'Open listing', 60))}</a>`;
@@ -100,7 +100,7 @@ const SHORT_TOWNS: Record<string, string> = { 'Vila Nova de Gaia': 'Gaia' };
  * rent and area on one line, the title and its /show link on the next. The
  * score and driving time are left out here; they are on the card.
  */
-export function listEntry(row: ListingRow, icon = row.status === 'removed' ? '❌' : row.userState === 'ignored' ? '🚫' : row.stage === 'visit' ? '📅' : row.stage === 'contacted' ? '📞' : '⭐'): string {
+export function listEntry(row: ListingRow, icon = row.status === 'removed' ? '❌' : row.userState === 'ignored' ? '🚫' : row.stage === 'visited' ? '👀' : row.stage === 'visit' ? '📅' : row.stage === 'contacted' ? '📞' : '⭐'): string {
   const l = row.listing;
   const facts = [l.typology === null ? null : `T${l.typology}`, l.price === null ? null : euro(l.price)].filter(Boolean).join(' · ') || 'Details not stated';
   const town = l.municipality ? (SHORT_TOWNS[l.municipality] ?? l.municipality) : null;

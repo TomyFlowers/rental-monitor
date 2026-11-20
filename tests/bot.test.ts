@@ -151,8 +151,18 @@ describe('contact tracking', () => {
 
     await press(`v:${a}`);
     expect(store.byId(a)!.stage).toBe('visit');
-    expect(editedButtons()).toEqual([`y:${a}`, `i:${a}`, 'https://example.test/a']);
+    expect(editedButtons()).toEqual([`y:${a}`, `w:${a}`, `i:${a}`, 'https://example.test/a']);
 
+    await press(`w:${a}`);
+    expect(store.byId(a)!.stage).toBe('visited');
+    expect(editedButtons()).toEqual([`z:${a}`, `i:${a}`, 'https://example.test/a']);
+    await say('/contacted');
+    expect(lastCard().text).toContain('visited today, not decided');
+    await say(`/show_${a}`);
+    expect(lastCard().text).toContain('👀 visited, not decided today');
+
+    await press(`z:${a}`);
+    expect(store.byId(a)!.stage).toBe('visit');
     await press(`y:${a}`);
     expect(store.byId(a)!.stage).toBe('contacted');
     await press(`x:${a}`);
@@ -163,12 +173,14 @@ describe('contact tracking', () => {
     const plain = add('plain');
     const called = add('called');
     const visit = add('visit');
+    const seen = add('seen');
     store.setUserState(plain, 'favorite');
     store.setStage(called, 'contacted', '2026-11-14T10:00:00Z');
     store.setStage(visit, 'visit', '2026-11-15T10:00:00Z');
+    store.setStage(seen, 'visited', '2026-11-16T10:00:00Z');
     await say('/favorites');
     const text: string = lastCard().text;
-    expect(text).toMatch(/📅 Visit booked \(1\)[\s\S]*example\.test\/visit[\s\S]*📞 Contacted \(1\)[\s\S]*example\.test\/called[\s\S]*⭐ Not contacted yet \(1\)[\s\S]*example\.test\/plain/);
+    expect(text).toMatch(/👀 Visited, not decided \(1\)[\s\S]*example\.test\/seen[\s\S]*📅 Visit booked \(1\)[\s\S]*example\.test\/visit[\s\S]*📞 Contacted \(1\)[\s\S]*example\.test\/called[\s\S]*⭐ Not contacted yet \(1\)[\s\S]*example\.test\/plain/);
     expect(text).toContain('📞 <b>T2 · €900</b> · Mafamude, Gaia');
   });
 

@@ -43,10 +43,11 @@ export function keyboard(row: ListingRow): InlineKeyboard {
     kb.text('⭐ Favorite', `f:${row.id}`).text('🚫 Ignore', `i:${row.id}`);
     return open();
   }
-  // A favourite moves through stages: contacted, then visit booked. "Closed" is ignore.
+  // A favourite moves through stages: contacted, visit booked, visited. "Closed" is ignore.
   if (row.stage === 'none') kb.text('⭐ Favorited (undo)', `u:${row.id}`).text('📞 Contacted', `c:${row.id}`).row().text('🚫 Ignore', `i:${row.id}`);
   else if (row.stage === 'contacted') kb.text('📞 Contacted (undo)', `x:${row.id}`).text('📅 Visit booked', `v:${row.id}`).row().text('🚫 Closed', `i:${row.id}`);
-  else kb.text('📅 Visit booked (undo)', `y:${row.id}`).row().text('🚫 Closed', `i:${row.id}`);
+  else if (row.stage === 'visit') kb.text('📅 Visit booked (undo)', `y:${row.id}`).text('👀 Visited', `w:${row.id}`).row().text('🚫 Closed', `i:${row.id}`);
+  else kb.text('👀 Visited (undo)', `z:${row.id}`).row().text('🚫 Closed', `i:${row.id}`);
   return open();
 }
 
@@ -153,7 +154,8 @@ export class TelegramBot implements Notifier {
     const state = row.status === 'removed' ? '❌ no longer online' : row.userState === 'ignored' ? '🚫 ignored' : row.userState === 'favorite' ? '⭐ favourite' : 'not rated';
     const lines = [alertHtml({ type: 'new', payload: {}, row }, this.cfg.commute.destination.name).replace(/^.*\n/, `📋 <b>Listing ${row.id} · ${state} · ${Math.round(row.evaluation.score)}/100</b>\n`)];
     const now = new Date();
-    if (row.contactedAt) lines.push(`📞 Contacted ${ago(row.contactedAt, now)}${row.stage === 'visit' && row.stageAt ? ` · 📅 visit booked ${ago(row.stageAt, now)}` : ''}`);
+    const step = row.stage === 'visit' ? '📅 visit booked' : row.stage === 'visited' ? '👀 visited, not decided' : null;
+    if (row.contactedAt) lines.push(`📞 Contacted ${ago(row.contactedAt, now)}${step && row.stageAt ? ` · ${step} ${ago(row.stageAt, now)}` : ''}`);
     for (const n of this.store.notes(row.id, 3).reverse()) lines.push(`📝 ${esc(n.author)}, ${ago(n.at, now)}: ${esc(n.text)}`);
     return lines.join('\n');
   }
@@ -237,6 +239,7 @@ export class TelegramBot implements Notifier {
       if (rows.length === 0) return ctx.reply('No favourites yet. Tap ⭐ on a listing to add one.');
       const shown = rows.slice(0, 25);
       const groups = [
+        { title: '👀 Visited, not decided', rows: shown.filter((r) => r.stage === 'visited') },
         { title: '📅 Visit booked', rows: shown.filter((r) => r.stage === 'visit') },
         { title: '📞 Contacted', rows: shown.filter((r) => r.stage === 'contacted') },
         { title: '⭐ Not contacted yet', rows: shown.filter((r) => r.stage === 'none') },
@@ -251,7 +254,11 @@ export class TelegramBot implements Notifier {
     this.bot.command('ignored', (ctx) => list(ctx, this.store.ignored(), 'Ignored', 'Nothing is ignored.'));
     this.bot.command('contacted', (ctx) =>
       list(ctx, this.store.inProgress(), 'Contacted', 'Nothing in progress. Tap 📞 Contacted on a favourite once you have written or called.', (row) => {
-        const what = row.stage === 'visit' ? `visit booked ${ago(row.stageAt ?? '', new Date())}` : `contacted ${ago(row.contactedAt ?? row.stageAt ?? '', new Date())}`;
+        const now = new Date();
+        const what =
+          row.stage === 'visited' ? `visited ${ago(row.stageAt ?? '', now)}, not decided`
+          : row.stage === 'visit' ? `visit booked ${ago(row.stageAt ?? '', now)}`
+          : `contacted ${ago(row.contactedAt ?? row.stageAt ?? '', now)}`;
         const note = this.store.notes(row.id, 1)[0];
         return `${listEntry(row)}\n${what}${note ? ` · 📝 ${esc(note.text.slice(0, 80))}` : ''}`;
       }),
@@ -323,7 +330,7 @@ export class TelegramBot implements Notifier {
     // link can be anywhere, so the text an app's Share button produces works too.
     this.bot.hears(/https?:\/\/\S+/i, (ctx) => add(ctx, ctx.message?.text ?? ctx.message?.caption ?? ''));
 
-    this.bot.callbackQuery(/^([fiucvxy]):(\d+)$/, async (ctx) => {
+    this.bot.callbackQuery(/^([fiucvxywz]):(\d+)$/, async (ctx) => {
       const action = ctx.match[1]!;
       const id = Number(ctx.match[2]);
       const before = this.store.byId(id);
@@ -354,6 +361,14 @@ export class TelegramBot implements Notifier {
         case 'y':
           this.store.setStage(id, 'contacted', now);
           text = 'Back to contacted';
+          break;
+        case 'w':
+          this.store.setStage(id, 'visited', now);
+          text = 'Marked as visited. Reply to this message with your impressions.';
+          break;
+        case 'z':
+          this.store.setStage(id, 'visit', now);
+          text = 'Back to visit booked';
           break;
         default:
           this.store.setUserState(id, 'none');

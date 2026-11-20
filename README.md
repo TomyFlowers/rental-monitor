@@ -92,8 +92,10 @@ shows up in `/top` and in the 19:00 digest.
 ### Tracking contacts
 
 A favourite's card has a **📞 Contacted** button. After that it offers
-**📅 Visit booked** and **🚫 Closed** (closed moves it to ignored, e.g. when
-the flat turns out to be rented). Each step can be undone from the same card.
+**📅 Visit booked**, then **👀 Visited** (seen it, not decided yet), with
+**🚫 Closed** available at every step (closed moves it to ignored, e.g. when
+the flat turns out to be rented). Each step can be undone from the same card,
+and `/favorites` groups listings by how far along they are.
 Contacted listings keep reporting price changes and removals, and the 19:00
 digest lists any that have had no update (stage change or note) for
 `notifications.contactNudgeDays` days (3 by default, 0 turns it off).
