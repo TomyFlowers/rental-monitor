@@ -184,6 +184,21 @@ describe('contact tracking', () => {
     expect(text).toContain('📞 <b>T2 · €900</b> · Mafamude, Gaia');
   });
 
+  it('orders /contacted as contacted, visit booked, visited, longest-waiting first in each', async () => {
+    const seen = add('seen');
+    const booked = add('booked');
+    const called2 = add('called2');
+    const called1 = add('called1');
+    store.setStage(seen, 'visited', '2026-11-10T10:00:00Z');
+    store.setStage(booked, 'visit', '2026-11-11T10:00:00Z');
+    store.setStage(called2, 'contacted', '2026-11-14T10:00:00Z');
+    store.setStage(called1, 'contacted', '2026-11-12T10:00:00Z');
+    await say('/contacted');
+    expect(lastCard().text).toMatch(
+      /📞 Contacted \(2\)[\s\S]*example\.test\/called1[\s\S]*example\.test\/called2[\s\S]*📅 Visit booked \(1\)[\s\S]*example\.test\/booked[\s\S]*👀 Visited, not decided \(1\)[\s\S]*example\.test\/seen/,
+    );
+  });
+
   it('stars a listing when it is marked contacted, and clears the stage when un-starred', async () => {
     const a = add('a');
     await press(`c:${a}`);

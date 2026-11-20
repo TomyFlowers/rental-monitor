@@ -233,35 +233,54 @@ export class TelegramBot implements Notifier {
       const head = `<b>${title} (${rows.length})</b>${rows.length > shown.length ? ` – first ${shown.length}` : ''}\nTap a /show link to open a listing with its buttons.`;
       await ctx.reply([head, ...shown.map(line)].join('\n\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
     };
-    // Favourites are grouped by how far each has got, the furthest along first.
-    this.bot.command('favorites', async (ctx) => {
-      const rows = this.store.favorites();
-      if (rows.length === 0) return ctx.reply('No favourites yet. Tap ⭐ on a listing to add one.');
-      const shown = rows.slice(0, 25);
-      const groups = [
-        { title: '👀 Visited, not decided', rows: shown.filter((r) => r.stage === 'visited') },
-        { title: '📅 Visit booked', rows: shown.filter((r) => r.stage === 'visit') },
-        { title: '📞 Contacted', rows: shown.filter((r) => r.stage === 'contacted') },
-        { title: '⭐ Not contacted yet', rows: shown.filter((r) => r.stage === 'none') },
-      ].filter((g) => g.rows.length > 0);
-      const blocks = [`<b>Favourites (${rows.length})</b>${rows.length > shown.length ? ` – first ${shown.length}` : ''}\nTap a /show link to open a listing with its buttons.`];
-      for (const g of groups) {
-        if (groups.length > 1) blocks.push(`<b>${g.title} (${g.rows.length})</b>`);
-        blocks.push(...g.rows.map((r) => listEntry(r)));
+    type Group = { title: string; stage: ListingRow['stage'] };
+    /** One message, with a heading per stage (headings are left out when only one stage has listings). */
+    const grouped = async (ctx: Context, title: string, rows: ListingRow[], groups: Group[], empty: string, line: (row: ListingRow) => string = (r) => listEntry(r)) => {
+      if (rows.length === 0) return ctx.reply(empty);
+      const filled = groups.map((g) => ({ ...g, rows: rows.filter((r) => r.stage === g.stage) })).filter((g) => g.rows.length > 0);
+      const max = 25;
+      const blocks = [`<b>${title} (${rows.length})</b>${rows.length > max ? ` – first ${max}` : ''}\nTap a /show link to open a listing with its buttons.`];
+      let left = max;
+      for (const g of filled) {
+        if (left <= 0) break;
+        if (filled.length > 1) blocks.push(`<b>${g.title} (${g.rows.length})</b>`);
+        blocks.push(...g.rows.slice(0, left).map(line));
+        left -= g.rows.length;
       }
       await ctx.reply(blocks.join('\n\n'), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
-    });
+    };
+    // Favourites: the furthest along first.
+    this.bot.command('favorites', (ctx) =>
+      grouped(ctx, 'Favourites', this.store.favorites(), [
+        { title: '👀 Visited, not decided', stage: 'visited' },
+        { title: '📅 Visit booked', stage: 'visit' },
+        { title: '📞 Contacted', stage: 'contacted' },
+        { title: '⭐ Not contacted yet', stage: 'none' },
+      ], 'No favourites yet. Tap ⭐ on a listing to add one.'),
+    );
     this.bot.command('ignored', (ctx) => list(ctx, this.store.ignored(), 'Ignored', 'Nothing is ignored.'));
+    // In progress: in the order things happen (contacted, booked, visited), longest-waiting first within each.
     this.bot.command('contacted', (ctx) =>
-      list(ctx, this.store.inProgress(), 'Contacted', 'Nothing in progress. Tap 📞 Contacted on a favourite once you have written or called.', (row) => {
-        const now = new Date();
-        const what =
-          row.stage === 'visited' ? `visited ${ago(row.stageAt ?? '', now)}, not decided`
-          : row.stage === 'visit' ? `visit booked ${ago(row.stageAt ?? '', now)}`
-          : `contacted ${ago(row.contactedAt ?? row.stageAt ?? '', now)}`;
-        const note = this.store.notes(row.id, 1)[0];
-        return `${listEntry(row)}\n${what}${note ? ` · 📝 ${esc(note.text.slice(0, 80))}` : ''}`;
-      }),
+      grouped(
+        ctx,
+        'Contacted',
+        this.store.inProgress(),
+        [
+          { title: '📞 Contacted', stage: 'contacted' },
+          { title: '📅 Visit booked', stage: 'visit' },
+          { title: '👀 Visited, not decided', stage: 'visited' },
+        ],
+        'Nothing in progress. Tap 📞 Contacted on a favourite once you have written or called.',
+        (row) => {
+          const now = new Date();
+          const what =
+            row.stage === 'visited' ? `visited ${ago(row.stageAt ?? '', now)}, not decided`
+            : row.stage === 'visit' ? `visit booked ${ago(row.stageAt ?? '', now)}`
+            : `contacted ${ago(row.contactedAt ?? row.stageAt ?? '', now)}`;
+          const note = this.store.notes(row.id, 1)[0];
+          return `${listEntry(row)}\n${what}${note ? ` · 📝 ${esc(note.text.slice(0, 80))}` : ''}`;
+        },
+      ),
     );
 
     // /show_12 (tappable in lists) or "/show 12": the full card for one listing, with buttons.
